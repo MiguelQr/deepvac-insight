@@ -1,0 +1,596 @@
+"""GRU plant model + CODESYS-style PID/Diff simulation for the Simulator view.
+
+Runs a synthetic closed-loop scenario (start_temp -> target_temp) entirely
+in-process: the trained GRU predicts the next temperature, and a Python
+reimplementation of the CODESYS ChamberPID/Diff blocks drives the control
+signal that feeds back into the model on the next step.
+"""
+from __future__ import annotations
+
+import sys
+import types
+from pathlib import Path
+from typing import Any, Dict, List, Sequence, Tuple
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+
+def _ensure_sklearn_stub() -> None:
+    """Register minimal sklearn stubs so torch.load can unpickle StandardScaler
+    objects from checkpoints without requiring scikit-learn to be installed.
+
+    Pickle stores the *defining* module of a class. Depending on the sklearn
+    version used when the checkpoint was saved that path is one of:
+        sklearn.preprocessing._data.StandardScaler   (sklearn >= 0.24)
+        sklearn.preprocessing.data.StandardScaler    (sklearn < 0.24)
+    We register both, plus the top-level alias, and mark every stub module as a
+    package (``__path__ = []``) so Python allows sub-module lookups."""
+    if "sklearn" in sys.modules:
+        return
+
+    class _StandardScaler:
+        def transform(self, X: np.ndarray) -> np.ndarray:
+            return (X - self.mean_) / self.scale_
+
+        def inverse_transform(self, X: np.ndarray) -> np.ndarray:
+            return X * self.scale_ + self.mean_
+
+    def _pkg(name: str) -> types.ModuleType:
+        m = types.ModuleType(name)
+        m.__path__ = []  # type: ignore[attr-defined]  # marks it as a package
+        m.__package__ = name
+        return m
+
+    sklearn_mod = _pkg("sklearn")
+    pre_mod = _pkg("sklearn.preprocessing")
+    pre_mod.StandardScaler = _StandardScaler  # type: ignore[attr-defined]
+    sklearn_mod.preprocessing = pre_mod  # type: ignore[attr-defined]
+
+    for sub in ("sklearn.preprocessing._data", "sklearn.preprocessing.data"):
+        sub_mod = types.ModuleType(sub)
+        sub_mod.StandardScaler = _StandardScaler  # type: ignore[attr-defined]
+        sys.modules[sub] = sub_mod
+
+    sys.modules["sklearn"] = sklearn_mod
+    sys.modules["sklearn.preprocessing"] = pre_mod
+
+
+DEFAULT_CHECKPOINT = Path(__file__).resolve().parent / "model.pt"
+
+DEFAULT_FEATURE_NAMES = [
+    "temp",
+    "temp_ref",
+    "error",
+    "temp_u",
+    "temp_u_p",
+    "temp_u_i",
+    "temp_u_d",
+    "kp",
+    "ki",
+    "kd",
+]
+
+
+class GRUModel(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 64,
+        num_layers: int = 2,
+        dropout: float = 0.10,
+    ) -> None:
+        super().__init__()
+
+        self.gru = nn.GRU(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+        )
+
+        self.head = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out, _ = self.gru(x)
+        return self.head(out[:, -1, :])
+
+
+def limit(low: float, x: float, high: float) -> float:
+    return max(low, min(float(x), high))
+
+
+class CodesysDiff:
+    """Stateful implementation of gru/codesys/diff.txt."""
+
+    def __init__(self, dc: float = 0.995) -> None:
+        self.dc = float(dc)
+        self.prev_value = 0.0
+        self.filter_out = 0.0
+        self.out = 0.0
+
+    def update(self, value: float) -> float:
+        diff_value = float(value) - self.prev_value
+        filter_in = limit(-5.0, diff_value, 5.0)
+        self.filter_out = self.dc * self.filter_out + (1.0 - self.dc) * filter_in
+        self.prev_value = float(value)
+        self.out = 10.0 * limit(-5.0, self.filter_out, 5.0)
+        return self.out
+
+
+class ChamberPID:
+    """Python equivalent of gru/codesys/pid.txt (Chamber_Control PID block)."""
+
+    def __init__(
+        self,
+        u_min: float = -1.0,
+        u_max: float = 1.0,
+        pid_i_reverse_mul: float = 0.333,
+    ) -> None:
+        self.u_min = float(u_min)
+        self.u_max = float(u_max)
+        self.pid_i_reverse_mul = float(pid_i_reverse_mul)
+
+        self.i_part = 0.0
+        self.p_part = 0.0
+        self.d_part = 0.0
+
+    def step(
+        self,
+        enable: bool,
+        x_target: float,
+        x_measured: float,
+        p_coef: float,
+        i_coef: float,
+        d_coef: float,
+        diff_out: float,
+    ) -> Tuple[float, float, float, float]:
+        if not enable:
+            self.p_part = 0.0
+            self.i_part = 0.0
+            self.d_part = 0.0
+            return 0.0, self.p_part, self.i_part, self.d_part
+
+        delta = float(x_target) - float(x_measured)
+
+        if float(p_coef) == 0.0:
+            return 0.0, self.p_part, self.i_part, self.d_part
+
+        self.p_part = (1.0 / float(p_coef)) * delta
+
+        effective_i_coef = float(i_coef)
+        if delta * self.i_part < 0.0:
+            effective_i_coef = float(i_coef) * self.pid_i_reverse_mul
+
+        delta_edge = 1.2 * float(p_coef)
+
+        if effective_i_coef != 0.0 and abs(delta) < delta_edge:
+            self.i_part += (1.0 / float(p_coef)) * (delta * 0.1 / effective_i_coef)
+
+        self.d_part = (1.0 / float(p_coef)) * (float(d_coef) * -float(diff_out))
+
+        self.i_part = limit(self.u_min, self.i_part, self.u_max)
+        self.d_part = limit(-0.4, self.d_part, 0.4)
+
+        u = self.p_part + self.i_part + self.d_part
+        u = limit(self.u_min, u, self.u_max)
+
+        # For logging, same as the ST code.
+        self.p_part = limit(self.u_min, self.p_part, self.u_max)
+
+        return u, self.p_part, self.i_part, self.d_part
+
+
+def load_model(
+    checkpoint_path: Path,
+    device: torch.device,
+) -> Tuple[GRUModel, Dict[str, object]]:
+    _ensure_sklearn_stub()
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    model = GRUModel(
+        input_dim=int(checkpoint["input_dim"]),
+        hidden_dim=int(checkpoint["hidden_dim"]),
+        num_layers=int(checkpoint["num_layers"]),
+        dropout=float(checkpoint["dropout"]),
+    ).to(device)
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+
+    return model, checkpoint
+
+
+def predict_delta_t1(
+    model: GRUModel,
+    checkpoint: Dict[str, object],
+    feature_window: np.ndarray,
+    device: torch.device,
+) -> float:
+    x_scaler = checkpoint["x_scaler"]
+    y_scaler = checkpoint["y_scaler"]
+
+    n_features = feature_window.shape[-1]
+    x_scaled = x_scaler.transform(
+        feature_window.reshape(-1, n_features)
+    ).reshape(feature_window.shape)
+
+    xb = torch.as_tensor(x_scaled[None, :, :], dtype=torch.float32, device=device)
+
+    with torch.no_grad():
+        pred_scaled = model(xb).cpu().numpy()
+
+    pred_real = y_scaler.inverse_transform(pred_scaled)
+    return float(pred_real[0, 0])
+
+
+def make_feature_row(
+    feature_names: Sequence[str],
+    *,
+    temp: float,
+    temp_ref: float,
+    previous_temp: float,
+    dt_s: float,
+    u: float,
+    u_p: float,
+    u_i: float,
+    u_d: float,
+    kp: float,
+    ki: float,
+    kd: float,
+) -> np.ndarray:
+    error = float(temp_ref) - float(temp)
+    dt_safe = max(float(dt_s), 1e-9)
+    temp_velocity = (float(temp) - float(previous_temp)) / dt_safe
+    values = {
+        "temp": float(temp),
+        "temp_ref": float(temp_ref),
+        "error": float(error),
+        "abs_error": abs(float(error)),
+        "dt_s": float(dt_s),
+        "temp_velocity": temp_velocity,
+        "error_velocity": -temp_velocity,
+        "temp_u": float(u),
+        "temp_u_p": float(u_p),
+        "temp_u_i": float(u_i),
+        "temp_u_d": float(u_d),
+        "kp": float(kp),
+        "ki": float(ki),
+        "kd": float(kd),
+    }
+    return np.asarray([float(values.get(name, 0.0)) for name in feature_names], dtype=np.float32)
+
+
+def initialize_feature_window(
+    feature_names: Sequence[str],
+    window_steps: int,
+    start_temp: float,
+    precondition_ref: float,
+    dt_s: float,
+    kp: float,
+    ki: float,
+    kd: float,
+) -> np.ndarray:
+    row = make_feature_row(
+        feature_names,
+        temp=start_temp,
+        temp_ref=precondition_ref,
+        previous_temp=start_temp,
+        dt_s=dt_s,
+        u=0.0,
+        u_p=0.0,
+        u_i=0.0,
+        u_d=0.0,
+        kp=kp,
+        ki=ki,
+        kd=kd,
+    )
+    return np.tile(row, (window_steps, 1)).astype(np.float32)
+
+
+def run_pid_substeps(
+    *,
+    pid: ChamberPID,
+    diff: CodesysDiff,
+    temp_start: float,
+    temp_ref: float,
+    kp: float,
+    ki: float,
+    kd: float,
+    dt_s: float,
+    period_s: float,
+    feature_scale: float,
+) -> Dict[str, float]:
+    """Run the CODESYS-style PID/Diff at internal ``period_s`` substeps.
+
+    In closed-loop mode the future true temperature is unknown, so the
+    measured temperature is held at ``temp_start`` for every substep leading
+    up to the next GRU prediction.
+    """
+    period = max(float(period_s), 1e-6)
+    dt = max(float(dt_s), period)
+    n_substeps = max(1, int(round(dt / period)))
+
+    last = {
+        "u": 0.0,
+        "u_p": 0.0,
+        "u_i": 0.0,
+        "u_d": 0.0,
+        "diff_out": diff.out,
+        "n_substeps": n_substeps,
+    }
+
+    for _ in range(n_substeps):
+        diff_out = diff.update(float(temp_start))
+        u, u_p, u_i, u_d = pid.step(
+            enable=True,
+            x_target=temp_ref,
+            x_measured=temp_start,
+            p_coef=kp,
+            i_coef=ki,
+            d_coef=kd,
+            diff_out=diff_out,
+        )
+        last = {
+            "u": u * feature_scale,
+            "u_p": u_p * feature_scale,
+            "u_i": u_i * feature_scale,
+            "u_d": u_d * feature_scale,
+            "diff_out": diff_out,
+            "n_substeps": n_substeps,
+        }
+    return last
+
+
+def predict_next(
+    *,
+    model: GRUModel,
+    checkpoint: Dict[str, object],
+    feature_window: np.ndarray,
+    feature_names: Sequence[str],
+    device: torch.device,
+    temp: float,
+    previous_temp: float,
+    temp_ref: float,
+    dt_s: float,
+    terms: Dict[str, float],
+    kp: float,
+    ki: float,
+    kd: float,
+) -> Tuple[float, float, np.ndarray]:
+    local_window = feature_window.copy()
+    local_window[-1, :] = make_feature_row(
+        feature_names,
+        temp=temp,
+        temp_ref=temp_ref,
+        previous_temp=previous_temp,
+        dt_s=dt_s,
+        u=terms["u"],
+        u_p=terms["u_p"],
+        u_i=terms["u_i"],
+        u_d=terms["u_d"],
+        kp=kp,
+        ki=ki,
+        kd=kd,
+    )
+    delta = predict_delta_t1(model, checkpoint, local_window, device)
+    return float(temp) + float(delta), float(delta), local_window
+
+
+def simulate_candidate(
+    *,
+    candidate_id: int,
+    kp: float,
+    ki: float,
+    kd: float,
+    model: GRUModel,
+    checkpoint: Dict[str, object],
+    feature_names: Sequence[str],
+    window_steps: int,
+    args: Any,
+    device: torch.device,
+    save_trajectory: bool = False,
+) -> Tuple[Dict[str, float], "pd.DataFrame | None"]:
+    import pandas as pd
+
+    start_temp = float(args.start_temp)
+    target_temp = float(args.target_temp)
+    duration_s = float(args.duration_s)
+    dt_s = float(args.dt_s)
+    n_steps = max(1, int(np.ceil(duration_s / dt_s)))
+    feature_scale = max(abs(float(args.control_feature_scale)), 1e-9)
+    precondition_ref = start_temp if args.precondition_ref is None else float(args.precondition_ref)
+
+    pid = ChamberPID(args.u_min, args.u_max, args.pid_i_reverse_mul)
+    pid.p_part = float(args.initial_p)
+    pid.i_part = float(args.initial_i)
+    pid.d_part = float(args.initial_d)
+
+    diff = CodesysDiff()
+    diff.prev_value = start_temp
+    diff.filter_out = 0.0
+    diff.out = 0.0
+
+    feature_window = initialize_feature_window(
+        feature_names=feature_names,
+        window_steps=window_steps,
+        start_temp=start_temp,
+        precondition_ref=precondition_ref,
+        dt_s=dt_s,
+        kp=kp,
+        ki=ki,
+        kd=kd,
+    )
+
+    current_temp = start_temp
+    previous_temp = start_temp
+    rows: List[Dict[str, float]] = []
+    temps: List[float] = []
+    times: List[float] = []
+
+    valid = True
+    invalid_reason = ""
+
+    for step in range(n_steps):
+        terms = run_pid_substeps(
+            pid=pid, diff=diff, temp_start=current_temp,
+            temp_ref=target_temp, kp=kp, ki=ki, kd=kd,
+            dt_s=dt_s, period_s=args.pid_period_s,
+            feature_scale=feature_scale,
+        )
+        next_temp, pred_delta, pred_window = predict_next(
+            model=model, checkpoint=checkpoint, feature_window=feature_window,
+            feature_names=feature_names, device=device, temp=current_temp,
+            previous_temp=previous_temp, temp_ref=target_temp, dt_s=dt_s,
+            terms=terms, kp=kp, ki=ki, kd=kd,
+        )
+
+        if not np.isfinite(next_temp) or abs(next_temp) > float(args.max_abs_temp):
+            valid = False
+            invalid_reason = f"temperature became invalid at step {step}: {next_temp}"
+            # Keep a finite placeholder so metrics don't crash.
+            next_temp = float(np.nan_to_num(next_temp, nan=args.max_abs_temp,
+                              posinf=args.max_abs_temp, neginf=-args.max_abs_temp))
+
+        temps.append(float(next_temp))
+        times.append(float((step + 1) * dt_s))
+
+        if save_trajectory:
+            rows.append({
+                "candidate_id": candidate_id,
+                "step": step + 1,
+                "elapsed_s": (step + 1) * dt_s,
+                "temp": next_temp,
+                "temp_ref": target_temp,
+                "error": target_temp - next_temp,
+                "kp": kp,
+                "ki": ki,
+                "kd": kd,
+                "u": terms["u"],
+                "u_p": terms["u_p"],
+                "u_i": terms["u_i"],
+                "u_d": terms["u_d"],
+                "diff_out": terms["diff_out"],
+                "pred_delta": pred_delta,
+            })
+
+        next_feature = make_feature_row(
+            feature_names,
+            temp=next_temp,
+            temp_ref=target_temp,
+            previous_temp=current_temp,
+            dt_s=dt_s,
+            u=terms["u"],
+            u_p=terms["u_p"],
+            u_i=terms["u_i"],
+            u_d=terms["u_d"],
+            kp=kp,
+            ki=ki,
+            kd=kd,
+        )
+        feature_window = np.roll(pred_window, shift=-1, axis=0)
+        feature_window[-1, :] = next_feature
+        previous_temp = current_temp
+        current_temp = next_temp
+
+    metrics = compute_metrics(
+        candidate_id=candidate_id,
+        kp=kp,
+        ki=ki,
+        kd=kd,
+        times=np.asarray(times, dtype=float),
+        temps=np.asarray(temps, dtype=float),
+        target_temp=target_temp,
+        start_temp=start_temp,
+        valid=valid,
+        invalid_reason=invalid_reason,
+        args=args,
+    )
+    traj_df = pd.DataFrame(rows) if save_trajectory else None
+    return metrics, traj_df
+
+
+def compute_metrics(
+    *,
+    candidate_id: int,
+    kp: float,
+    ki: float,
+    kd: float,
+    times: np.ndarray,
+    temps: np.ndarray,
+    target_temp: float,
+    start_temp: float,
+    valid: bool,
+    invalid_reason: str,
+    args: Any,
+) -> Dict[str, float]:
+    error = target_temp - temps
+    abs_error = np.abs(error)
+
+    tail_start = max(0.0, float(args.duration_s) - float(args.tail_window_s))
+    tail_mask = times >= tail_start
+    if not np.any(tail_mask):
+        tail_mask = np.ones_like(times, dtype=bool)
+
+    tail_abs_error = abs_error[tail_mask]
+    tail_error = error[tail_mask]
+    tail_temp = temps[tail_mask]
+
+    if target_temp <= start_temp:
+        # Cooling: overshoot means going below target.
+        overshoot = np.maximum(target_temp - temps, 0.0)
+    else:
+        # Heating: overshoot means going above target.
+        overshoot = np.maximum(temps - target_temp, 0.0)
+
+    near_idx = np.where(abs_error <= float(args.near_band))[0]
+    settle_idx = np.where(abs_error <= float(args.settle_band))[0]
+    time_to_near = float(times[int(near_idx[0])]) if len(near_idx) else float(args.duration_s) + 999.0
+    time_to_settle = float(times[int(settle_idx[0])]) if len(settle_idx) else float(args.duration_s) + 999.0
+
+    tail_mae = float(np.mean(tail_abs_error))
+    tail_bias = float(np.mean(tail_error))
+    tail_std = float(np.std(tail_temp))
+    overshoot_max = float(np.max(overshoot))
+    overshoot_rmse = float(np.sqrt(np.mean(np.square(overshoot))))
+    final_error = float(error[-1])
+    final_abs_error = abs(final_error)
+    cost = (
+        float(args.w_tail_mae) * tail_mae
+        + float(args.w_overshoot_max) * overshoot_max
+        + float(args.w_tail_std) * tail_std
+        + float(args.w_final_error) * final_abs_error
+    )
+    if not valid:
+        cost += float(args.w_invalid)
+
+    return {
+        "candidate_id": int(candidate_id),
+        "kp": float(kp),
+        "ki": float(ki),
+        "kd": float(kd),
+        "cost": float(cost),
+        "valid": bool(valid),
+        "invalid_reason": invalid_reason,
+        "tail_mae": tail_mae,
+        "tail_bias": tail_bias,
+        "tail_std": tail_std,
+        "overshoot_max": overshoot_max,
+        "overshoot_rmse": overshoot_rmse,
+        "final_error": final_error,
+        "final_abs_error": final_abs_error,
+        "time_to_near_s": time_to_near,
+        "time_to_settle_s": time_to_settle,
+        "mae_full": float(np.mean(abs_error)),
+        "min_temp": float(np.min(temps)),
+        "max_temp": float(np.max(temps)),
+        "end_temp": float(temps[-1]),
+    }
