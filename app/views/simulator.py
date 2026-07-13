@@ -31,7 +31,7 @@ class SimulatorMixin:
         form_lay = QVBoxLayout(form_card)
         form_lay.setContentsMargins(12, 12, 12, 12)
         form_lay.setSpacing(10)
-        hdr = QLabel("GRU SIMULATOR")
+        hdr = QLabel(self.tr("GRU SIMULATOR"))
         hdr.setObjectName("sectionLabel")
         form_lay.addWidget(hdr)
 
@@ -45,12 +45,19 @@ class SimulatorMixin:
             "duration_s": "1200", "dt_s": "2",
             "initial_p": "0", "initial_i": "0", "initial_d": "0",
         }
+        field_labels = {
+            "kp": self.tr("Kp"), "ki": self.tr("Ki"), "kd": self.tr("Kd"),
+            "start_temp": self.tr("Start Temp"), "target_temp": self.tr("Target Temp"),
+            "duration_s": self.tr("Duration S"), "dt_s": self.tr("Dt S"),
+            "initial_p": self.tr("Initial P"), "initial_i": self.tr("Initial I"),
+            "initial_d": self.tr("Initial D"),
+        }
         for i, (key, val) in enumerate(defaults.items()):
             cell = QWidget()
             cl   = QVBoxLayout(cell)
             cl.setContentsMargins(0, 0, 0, 0)
             cl.setSpacing(4)
-            lbl = QLabel(key.replace("_", " ").title())
+            lbl = QLabel(field_labels.get(key, key.replace("_", " ").title()))
             lbl.setObjectName("sectionLabel")
             ed = QLineEdit(val)
             self.sim_inputs[key] = ed
@@ -58,7 +65,7 @@ class SimulatorMixin:
             cl.addWidget(ed)
             form_grid.addWidget(cell, i // 5, i % 5)
             form_grid.setColumnStretch(i % 5, 1)
-        run_btn = QPushButton("Run Simulation")
+        run_btn = QPushButton(self.tr("Run Simulation"))
         run_btn.setObjectName("primaryButton")
         run_btn.clicked.connect(self.run_simulation)
         self.sim_button = run_btn
@@ -75,7 +82,7 @@ class SimulatorMixin:
         sim_lay.setContentsMargins(12, 12, 12, 12)
         sim_lay.setSpacing(8)
         sim_tb = QHBoxLayout()
-        self.sim_title   = QLabel("Awaiting simulation")
+        self.sim_title   = QLabel(self.tr("Awaiting simulation"))
         self.sim_title.setObjectName("title")
         self.sim_channel = QComboBox()
         self.sim_channel.addItems(["temp", "error", "u", "pred_delta"])
@@ -94,10 +101,10 @@ class SimulatorMixin:
             for key, ed in self.sim_inputs.items():
                 payload[key] = float(ed.text())
         except ValueError as exc:
-            QMessageBox.warning(self, "Invalid input", str(exc))
+            QMessageBox.warning(self, self.tr("Invalid input"), str(exc))
             return
         self.sim_button.setEnabled(False)
-        self.sim_title.setText("Running simulation…")
+        self.sim_title.setText(self.tr("Running simulation…"))
         self.sim_worker = SimWorker(payload)
         self.sim_worker.finished_ok.connect(lambda r: self._sim_done(payload, r))
         self.sim_worker.failed.connect(self._sim_failed)
@@ -107,24 +114,25 @@ class SimulatorMixin:
         self.sim_series = result
         self.sim_button.setEnabled(True)
         self.sim_title.setText(
-            f"Kp {payload['kp']:g} / Ki {payload['ki']:g} / Kd {payload['kd']:g}")
+            self.tr("Kp {0:g} / Ki {1:g} / Kd {2:g}").format(
+                payload['kp'], payload['ki'], payload['kd']))
         self._render_sim_summary()
         self._start_sim_animation()
 
     def _sim_failed(self, msg):
         self.sim_button.setEnabled(True)
-        self.sim_title.setText("Simulation failed")
-        QMessageBox.critical(self, "Simulation failed", msg)
+        self.sim_title.setText(self.tr("Simulation failed"))
+        QMessageBox.critical(self, self.tr("Simulation failed"), msg)
 
     def _render_sim_summary(self):
         self._clear_layout(self.sim_summary_grid)
         metrics = self.sim_series.get("metrics", {}) if self.sim_series else {}
         stats = [
-            ("Cost",      metrics.get("cost")),
-            ("Tail MAE",  metrics.get("tail_mae")),
-            ("End Temp",  metrics.get("end_temp")),
-            ("Overshoot", metrics.get("overshoot_max")),
-            ("Settle s",  metrics.get("time_to_settle_s")),
+            (self.tr("Cost"),      metrics.get("cost")),
+            (self.tr("Tail MAE"),  metrics.get("tail_mae")),
+            (self.tr("End Temp"),  metrics.get("end_temp")),
+            (self.tr("Overshoot"), metrics.get("overshoot_max")),
+            (self.tr("Settle s"),  metrics.get("time_to_settle_s")),
         ]
         for i, (lbl, val) in enumerate(stats):
             box = QFrame()
@@ -177,9 +185,9 @@ class SimulatorMixin:
             return
         self._sim_anim_idx = 0
         self.sim_chart.clear_plot_items()
-        self.sim_chart.plot.setLabel("bottom", "Time elapsed (s)")
+        self.sim_chart.plot.setLabel("bottom", self.tr("Time elapsed (s)"))
         self.sim_chart.plot.setLabel(
-            "left", "Temperature [deg C]" if ch == "temp" else "Value")
+            "left", self.tr("Temperature [deg C]") if ch == "temp" else self.tr("Value"))
         self.sim_chart.auto_range_on_draw = True
         self._sim_anim_curves = []
         for d in self._sim_anim_data:

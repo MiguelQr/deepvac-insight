@@ -71,17 +71,19 @@ def install_excepthook():
 
 def _show_crash_dialog(exc_type, exc_value, text):
     try:
+        from PySide6.QtCore import QCoreApplication
         from PySide6.QtWidgets import QApplication, QMessageBox
         app = QApplication.instance()
         if app is None:
             return
+        tr = lambda s: QCoreApplication.translate("LogService", s)
         box = QMessageBox()
         box.setIcon(QMessageBox.Critical)
-        box.setWindowTitle("Unexpected error")
+        box.setWindowTitle(tr("Unexpected error"))
         box.setText(
-            f"An unexpected error occurred and has been logged:\n\n"
-            f"{exc_type.__name__}: {exc_value}\n\n"
-            f"Log file: {LOG_FILE}")
+            tr("An unexpected error occurred and has been logged:") + "\n\n" +
+            f"{exc_type.__name__}: {exc_value}\n\n" +
+            tr("Log file: {0}").format(LOG_FILE))
         box.setDetailedText(text)
         box.setStandardButtons(QMessageBox.Ok)
         box.exec()

@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
+from PySide6.QtCore import QCoreApplication
+
 from app.common import DATA_DIR
 
 SAMPLES_FILE = "run_samples.csv"
@@ -16,6 +18,12 @@ BAND_METRICS_FILE = "band_metrics.csv"
 MAX_SERIES_POINTS = 1800
 CACHE_VERSION = 1
 CACHE_DB = DATA_DIR / "deepvac_runs.sqlite3"
+
+
+def _tr(text):
+    # Not a QObject here, so QCoreApplication.translate() rather than
+    # self.tr() -- pyside6-lupdate recognizes this pattern too.
+    return QCoreApplication.translate("DataService", text)
 
 
 class RunNotFound(FileNotFoundError):
@@ -384,7 +392,7 @@ def upload_runs(paths, progress=None):
     sources = _iter_upload_sources(paths)
     if not sources:
         raise ValueError(
-            f"No {SAMPLES_FILE} files found in the selected item(s)."
+            _tr("No {0} files found in the selected item(s).").format(SAMPLES_FILE)
         )
 
     conn = connect_cache()
@@ -446,7 +454,7 @@ def upload_runs(paths, progress=None):
 def rename_run(key, new_name):
     new_name = str(new_name).strip()
     if not new_name:
-        raise ValueError("Run name cannot be empty.")
+        raise ValueError(_tr("Run name cannot be empty."))
 
     conn = connect_cache()
     try:
@@ -559,9 +567,9 @@ def run_annotations(samples, summary, bands):
     annotations = []
 
     if start_temp is not None:
-        annotations.append({"type": "point", "kind": "start", "x": elapsed[0], "y": start_temp, "label": "Start temp"})
+        annotations.append({"type": "point", "kind": "start", "x": elapsed[0], "y": start_temp, "label": _tr("Start temp")})
     if target is not None:
-        annotations.append({"type": "line-y", "kind": "target", "y": target, "label": "Target"})
+        annotations.append({"type": "line-y", "kind": "target", "y": target, "label": _tr("Target")})
 
     if target is not None:
         valid_pairs = [(x_value, temp) for x_value, temp in zip(elapsed, temp_values) if temp is not None]
@@ -579,7 +587,7 @@ def run_annotations(samples, summary, bands):
                     "kind": "overshoot",
                     "x": overshoot_pair[0],
                     "y": overshoot_pair[1],
-                    "label": f"Max overshoot {overshoot_value:g}",
+                    "label": _tr("Max overshoot {0:g}").format(overshoot_value),
                 })
 
     settle_time = first_float(summary, ["settle_time_s", "time_to_settle_s", "settling_time_s"])
@@ -590,7 +598,7 @@ def run_annotations(samples, summary, bands):
             "kind": "settling",
             "x0": settle_time,
             "x1": duration if duration is not None and duration > settle_time else max(elapsed),
-            "label": "Settling region",
+            "label": _tr("Settling region"),
         })
 
     for row in bands:
@@ -598,7 +606,7 @@ def run_annotations(samples, summary, bands):
         if change_x is not None:
             if first_timestamp is not None and change_x >= first_timestamp:
                 change_x -= first_timestamp
-            annotations.append({"type": "line-x", "kind": "pid", "x": change_x, "label": "PID change"})
+            annotations.append({"type": "line-x", "kind": "pid", "x": change_x, "label": _tr("PID change")})
 
     invalid_start = None
     for index, row in enumerate(samples):
@@ -608,10 +616,10 @@ def run_annotations(samples, summary, bands):
         if invalid and invalid_start is None:
             invalid_start = elapsed[index]
         elif not invalid and invalid_start is not None:
-            annotations.append({"type": "region-x", "kind": "invalid", "x0": invalid_start, "x1": elapsed[index], "label": "Invalid region"})
+            annotations.append({"type": "region-x", "kind": "invalid", "x0": invalid_start, "x1": elapsed[index], "label": _tr("Invalid region")})
             invalid_start = None
     if invalid_start is not None:
-        annotations.append({"type": "region-x", "kind": "invalid", "x0": invalid_start, "x1": elapsed[-1], "label": "Invalid region"})
+        annotations.append({"type": "region-x", "kind": "invalid", "x0": invalid_start, "x1": elapsed[-1], "label": _tr("Invalid region")})
 
     return annotations
 
@@ -719,7 +727,7 @@ def make_sim_args(payload):
 def bounded_float(payload, name, default, low, high):
     value = float(payload.get(name, default))
     if value < low or value > high:
-        raise ValueError(f"{name} must be between {low:g} and {high:g}")
+        raise ValueError(_tr("{0} must be between {1:g} and {2:g}").format(name, low, high))
     return value
 
 

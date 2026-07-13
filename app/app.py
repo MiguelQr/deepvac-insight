@@ -1,14 +1,14 @@
 """Entry point — login flow, splash screen, and main() only."""
 import sys
 
-from PySide6.QtCore import Qt, QRectF, QSettings
+from PySide6.QtCore import Qt, QRectF, QSettings, QCoreApplication
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
 from app.common import LOGO_PATH, ICON_PATH
 from app.main_window import DeepVacDesktop
 from app.login_window import LoginWindow
-from app.services import auth_service, backup_service, log_service
+from app.services import auth_service, backup_service, log_service, i18n_service, settings_service
 
 
 class LoadingSplash(QSplashScreen):
@@ -57,6 +57,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(ICON_PATH))
+    i18n_service.install_language(app, settings_service.load_language())
 
     try:
         backup_service.backup_all()
@@ -76,7 +77,9 @@ def main():
 
         splash = make_splash()
         splash.show()
-        splash.showMessage("Starting DeepVac…", Qt.AlignCenter | Qt.AlignBottom, Qt.white)
+        splash.showMessage(
+            QCoreApplication.translate("main", "Starting DeepVac…"),
+            Qt.AlignCenter | Qt.AlignBottom, Qt.white)
         app.processEvents()
 
         window = DeepVacDesktop(splash=splash, current_user=user)

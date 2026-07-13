@@ -8,10 +8,18 @@ import secrets
 import sqlite3
 from datetime import datetime, timezone
 
+from PySide6.QtCore import QCoreApplication
+
 from app.common import DATA_DIR
 
 AUTH_DB = DATA_DIR / "deepvac_users.sqlite3"
 PBKDF2_ITERATIONS = 200_000
+
+
+def _tr(text):
+    # Not a QObject here, so QCoreApplication.translate() rather than
+    # self.tr() -- pyside6-lupdate recognizes this pattern too.
+    return QCoreApplication.translate("AuthService", text)
 
 
 class AuthError(Exception):
@@ -67,7 +75,7 @@ def _normalize_email(email):
 
 def _validate_email(email):
     if "@" not in email or "." not in email.split("@")[-1] or email.startswith("@"):
-        raise AuthError("Enter a valid email address.")
+        raise AuthError(_tr("Enter a valid email address."))
 
 
 def user_count():
@@ -82,10 +90,10 @@ def create_user(name, email, password):
     name = str(name).strip()
     email = _normalize_email(email)
     if not name:
-        raise AuthError("Name is required.")
+        raise AuthError(_tr("Name is required."))
     _validate_email(email)
     if len(password) < 8:
-        raise AuthError("Password must be at least 8 characters.")
+        raise AuthError(_tr("Password must be at least 8 characters."))
 
     password_hash, salt = _hash_password(password)
     now = _now()
@@ -100,7 +108,7 @@ def create_user(name, email, password):
                 (name, email, password_hash, salt, now, now),
             )
         except sqlite3.IntegrityError:
-            raise AuthError("An account with this email already exists.")
+            raise AuthError(_tr("An account with this email already exists."))
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _row_to_user(row)
@@ -167,11 +175,11 @@ def update_profile(user_id, name=None, email=None):
     try:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row:
-            raise AuthError("User not found.")
+            raise AuthError(_tr("User not found."))
         new_name = str(name).strip() if name is not None else row["name"]
         new_email = _normalize_email(email) if email is not None else row["email"]
         if not new_name:
-            raise AuthError("Name is required.")
+            raise AuthError(_tr("Name is required."))
         _validate_email(new_email)
         try:
             conn.execute(
@@ -179,7 +187,7 @@ def update_profile(user_id, name=None, email=None):
                 (new_name, new_email, _now(), user_id),
             )
         except sqlite3.IntegrityError:
-            raise AuthError("An account with this email already exists.")
+            raise AuthError(_tr("An account with this email already exists."))
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return _row_to_user(row)
@@ -192,11 +200,11 @@ def change_password(user_id, current_password, new_password):
     try:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row:
-            raise AuthError("User not found.")
+            raise AuthError(_tr("User not found."))
         if not _verify_password(current_password, row["password_salt"], row["password_hash"]):
-            raise AuthError("Current password is incorrect.")
+            raise AuthError(_tr("Current password is incorrect."))
         if len(new_password) < 8:
-            raise AuthError("New password must be at least 8 characters.")
+            raise AuthError(_tr("New password must be at least 8 characters."))
         password_hash, salt = _hash_password(new_password)
         conn.execute(
             "UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?",

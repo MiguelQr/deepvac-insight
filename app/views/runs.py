@@ -46,7 +46,7 @@ class RunsMixin:
         h_lay = QHBoxLayout(header)
         h_lay.setContentsMargins(12, 10, 8, 10)
         h_lay.setSpacing(0)
-        lbl = QLabel("RUNS")
+        lbl = QLabel(self.tr("RUNS"))
         lbl.setObjectName("sidebarPanelLabel")
         h_lay.addWidget(lbl, 1)
 
@@ -54,14 +54,14 @@ class RunsMixin:
         self.upload_btn.setObjectName("runsUploadButton")
         self.upload_btn.setIcon(_svg_icon("database", "#94a3b8", 14))
         self.upload_btn.setFixedSize(24, 24)
-        self.upload_btn.setToolTip("Upload run(s) into the database")
+        self.upload_btn.setToolTip(self.tr("Upload run(s) into the database"))
         self.upload_btn.clicked.connect(self._show_upload_menu)
         h_lay.addWidget(self.upload_btn)
         left_lay.addWidget(header)
 
         self.search_box = QLineEdit()
         self.search_box.setObjectName("searchBox")
-        self.search_box.setPlaceholderText("Search run id…")
+        self.search_box.setPlaceholderText(self.tr("Search run id…"))
         self.search_box.addAction(
             _svg_icon("search", "#64748b", 13), QLineEdit.LeadingPosition)
         self.search_box.textChanged.connect(self.render_runs)
@@ -83,7 +83,7 @@ class RunsMixin:
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(16, 16, 16, 16)
         right_lay.setSpacing(8)
-        self._raw_run_label = QLabel("Select a run to view raw data")
+        self._raw_run_label = QLabel(self.tr("Select a run to view raw data"))
         self._raw_run_label.setObjectName("title")
         right_lay.addWidget(self._raw_run_label)
         self._raw_run_table = QTableWidget()
@@ -97,14 +97,14 @@ class RunsMixin:
         from PySide6.QtWidgets import QMessageBox
 
         try:
-            self.splash_msg("Loading runs…")
+            self.splash_msg(self.tr("Loading runs…"))
 
             def progress(i, total, msg):
-                self.splash_msg("Loading runs…")
+                self.splash_msg(self.tr("Loading runs…"))
 
             payload = data.list_runs(progress=progress)
         except Exception as exc:
-            QMessageBox.critical(self, "Unable to load runs", str(exc))
+            QMessageBox.critical(self, self.tr("Unable to load runs"), str(exc))
             return
         self.runs = payload["runs"]
         self.render_runs()
@@ -150,8 +150,8 @@ class RunsMixin:
             return
         key  = item.data(Qt.UserRole)
         menu = QMenu(self)
-        act_open   = menu.addAction("Open in Analysis")
-        act_rename = menu.addAction("Rename…")
+        act_open   = menu.addAction(self.tr("Open in Analysis"))
+        act_rename = menu.addAction(self.tr("Rename…"))
         chosen = menu.exec(self.run_list.viewport().mapToGlobal(pos))
         if chosen == act_open:
             self._open_run(key)
@@ -166,7 +166,7 @@ class RunsMixin:
         if not run:
             return
         new_name, ok = QInputDialog.getText(
-            self, "Rename run", "Name:", text=run["id"])
+            self, self.tr("Rename run"), self.tr("Name:"), text=run["id"])
         if not ok:
             return
         new_name = new_name.strip()
@@ -175,7 +175,7 @@ class RunsMixin:
         try:
             data.rename_run(key, new_name)
         except Exception as exc:
-            QMessageBox.critical(self, "Rename failed", str(exc))
+            QMessageBox.critical(self, self.tr("Rename failed"), str(exc))
             return
         run["id"] = new_name
         self.render_runs()
@@ -190,8 +190,8 @@ class RunsMixin:
 
     def _show_upload_menu(self):
         menu = QMenu(self)
-        act_folders = menu.addAction("Upload Folder(s)…")
-        act_files   = menu.addAction("Upload File(s)…")
+        act_folders = menu.addAction(self.tr("Upload Folder(s)…"))
+        act_files   = menu.addAction(self.tr("Upload File(s)…"))
         chosen = menu.exec(
             self.upload_btn.mapToGlobal(self.upload_btn.rect().bottomLeft()))
         if chosen == act_folders:
@@ -215,44 +215,50 @@ class RunsMixin:
 
     def _upload_folders(self):
         dirs = self._pick_multiple_dirs(
-            "Select run folder(s) to upload (a folder may hold one run or many run subfolders)")
+            self.tr("Select run folder(s) to upload (a folder may hold one run or many run subfolders)"))
         if dirs:
             self._start_upload(dirs)
 
     def _upload_files(self):
         from PySide6.QtWidgets import QFileDialog
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Select run_samples.csv file(s)", "",
-            "Run samples (run_samples.csv);;CSV files (*.csv);;All files (*)")
+            self, self.tr("Select run_samples.csv file(s)"), "",
+            self.tr("Run samples (run_samples.csv);;CSV files (*.csv);;All files (*)"))
         if files:
             self._start_upload(files)
 
     def _start_upload(self, paths):
         self.upload_btn.setEnabled(False)
-        self.upload_btn.setToolTip("Uploading…")
+        self.upload_btn.setToolTip(self.tr("Uploading…"))
         self._upload_worker = UploadWorker(paths)
         self._upload_worker.finished_ok.connect(self._upload_done)
         self._upload_worker.failed.connect(self._upload_failed)
         self._upload_worker.start()
 
     def _upload_done(self, result):
+        from PySide6.QtCore import QCoreApplication
         from PySide6.QtWidgets import QMessageBox
         self.upload_btn.setEnabled(True)
-        self.upload_btn.setToolTip("Upload run(s) into the database")
+        self.upload_btn.setToolTip(self.tr("Upload run(s) into the database"))
         self.runs = result["runs"]
         self.render_runs()
         self._refresh_dashboard()
         self._refresh_reports()
         n = len(result["imported"])
+        # self.tr()'s implicit context resolution doesn't reliably reach the
+        # %n/plural overload here (self is a DeepVacDesktop instance, not a
+        # RunsMixin one) -- call QCoreApplication.translate() directly with
+        # the exact context pyside6-lupdate recorded for this string.
         QMessageBox.information(
-            self, "Upload complete",
-            f"Imported {n} run{'s' if n != 1 else ''} into the database.")
+            self, self.tr("Upload complete"),
+            QCoreApplication.translate(
+                "RunsMixin", "Imported %n run(s) into the database.", "", n))
 
     def _upload_failed(self, msg):
         from PySide6.QtWidgets import QMessageBox
         self.upload_btn.setEnabled(True)
-        self.upload_btn.setToolTip("Upload run(s) into the database")
-        QMessageBox.critical(self, "Upload failed", msg)
+        self.upload_btn.setToolTip(self.tr("Upload run(s) into the database"))
+        QMessageBox.critical(self, self.tr("Upload failed"), msg)
 
     def _open_run(self, key):
         run = next((r for r in self.runs if r["key"] == key), None)

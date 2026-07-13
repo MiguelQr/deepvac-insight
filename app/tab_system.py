@@ -139,17 +139,17 @@ class TabBar(QWidget):
     def _ctx(self, event, key):
         i = self._idx(key)
         menu   = QMenu(self)
-        a_sr   = menu.addAction("Split Right")
+        a_sr   = menu.addAction(self.tr("Split Right"))
         moves  = []
         if callable(self.get_other_groups):
             others = self.get_other_groups()
             if others:
                 menu.addSeparator()
                 for g in others:
-                    act = menu.addAction(f"Move to Pane {g.group_id}")
+                    act = menu.addAction(self.tr("Move to Pane {0}").format(g.group_id))
                     moves.append((act, g.group_id))
         menu.addSeparator()
-        a_cl   = menu.addAction("Close")
+        a_cl   = menu.addAction(self.tr("Close"))
         chosen = menu.exec(event.globalPos())
         if chosen == a_sr:
             self.split_right_requested.emit(i)
@@ -358,7 +358,7 @@ class EditorArea(QWidget):
         self._sync_btn.setFixedSize(28, 28)
         self._sync_btn.setIcon(_svg_icon("layout-split", "#94a3b8", 14))
         self._sync_btn.setIconSize(QSize(14, 14))
-        self._sync_btn.setToolTip("Sync crosshair across all plots")
+        self._sync_btn.setToolTip(self.tr("Sync crosshair across all plots"))
         self._sync_btn.toggled.connect(self._on_sync_toggled)
         self._sync_btn.raise_()
         self._position_sync_btn()

@@ -19,7 +19,9 @@ insight/
 │   │   ├── data_service.py         # run cache (sqlite), report generation
 │   │   ├── auth_service.py         # user accounts (sqlite), password hashing, sessions
 │   │   ├── annotations_service.py  # chart annotations + variable rules (sqlite), per run/user
-│   │   └── backup_service.py       # automated sqlite backups + restore
+│   │   ├── backup_service.py       # automated sqlite backups + restore
+│   │   ├── tcp_client.py           # live chamber TCP connection (Live Monitoring)
+│   │   └── opc_broadcast_server.py # broadcasts chamber samples to TCP clients (OPC Server page)
 │   ├── views/            # one module per page (dashboard, runs, reports, simulator, monitoring, opc)
 │   └── model/             # bundled GRU checkpoint + closed-loop simulator
 │       ├── model.pt
@@ -84,3 +86,28 @@ recent backups. Use the gear icon → **Back Up Now** to force an extra backup,
 or **Open Backups Folder** to browse them. To restore, call
 `backup_service.restore_backup(db_name, backup_path)` — it safety-copies the
 current (possibly damaged) database first, so a bad restore can be undone.
+
+## Live Monitoring & OPC Server
+
+Live Monitoring connects to a real chamber over TCP (`app/services/tcp_client.py`,
+built on `QTcpSocket`). Wire protocol: newline-delimited JSON, one object per
+line, with the same keys as a `run_samples.csv` row (`temp`, `temp_ref`,
+`kp`, `ki`, `kd`, `temp_u`, `temp_u_p`, `temp_u_i`, `temp_u_d`). Once
+connected, the title bar's chamber-status pill and notification bell reflect
+it live, the Live Data table updates as samples arrive, and any defined
+alarms are evaluated against each sample.
+
+The OPC Server page can only be started once that chamber connection is
+established — it re-broadcasts each incoming sample to any TCP client that
+connects on the configured port (`app/services/opc_broadcast_server.py`).
+**This is a simplified JSON broadcast, not a spec-compliant OPC UA server**
+(no `asyncua`/`opcua` dependency is installed); swap in a real OPC UA server
+there if protocol compliance is required. Disconnecting the chamber
+connection automatically stops it.
+
+To test this without real hardware, run the gitignored dummy chamber server
+(`tcp/`, not part of the shipped app) and point Live Monitoring at it:
+
+```powershell
+python tcp\dummy_chamber_server.py --port 5555
+```

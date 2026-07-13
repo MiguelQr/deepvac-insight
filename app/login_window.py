@@ -14,7 +14,7 @@ class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.authenticated_user = None
-        self.setWindowTitle("Sign in — DeepVac Insight")
+        self.setWindowTitle(self.tr("Sign in — DeepVac Insight"))
         self.setWindowIcon(QIcon(ICON_PATH))
         self.setFixedSize(420, 560)
         self._build_ui()
@@ -34,12 +34,12 @@ class LoginWindow(QWidget):
         if not pix.isNull():
             logo_lbl.setPixmap(pix.scaledToHeight(48, Qt.SmoothTransformation))
         else:
-            logo_lbl.setText("DEEPVAC")
+            logo_lbl.setText(self.tr("DEEPVAC"))
             logo_lbl.setObjectName("brand")
         logo_lbl.setAlignment(Qt.AlignCenter)
         root.addWidget(logo_lbl)
 
-        self.title_lbl = QLabel("Sign in")
+        self.title_lbl = QLabel(self.tr("Sign in"))
         self.title_lbl.setObjectName("formTitle")
         self.title_lbl.setAlignment(Qt.AlignCenter)
         root.addWidget(self.title_lbl)
@@ -70,26 +70,26 @@ class LoginWindow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
 
-        self.login_email = self._field("Email")
-        self.login_password = self._field("Password", password=True)
+        self.login_email = self._field(self.tr("Email"))
+        self.login_password = self._field(self.tr("Password"), password=True)
         self.login_email.returnPressed.connect(self._do_login)
         self.login_password.returnPressed.connect(self._do_login)
         lay.addWidget(self.login_email)
         lay.addWidget(self.login_password)
 
-        self.remember_cb = QCheckBox("Remember me on this device")
+        self.remember_cb = QCheckBox(self.tr("Remember me on this device"))
         lay.addWidget(self.remember_cb)
 
-        login_btn = QPushButton("Sign In")
+        login_btn = QPushButton(self.tr("Sign In"))
         login_btn.setObjectName("primaryButton")
         login_btn.setMinimumHeight(36)
         login_btn.clicked.connect(self._do_login)
         lay.addWidget(login_btn)
 
         switch_row = QHBoxLayout()
-        switch_lbl = QLabel("Don't have an account?")
+        switch_lbl = QLabel(self.tr("Don't have an account?"))
         switch_lbl.setObjectName("mutedLabel")
-        switch_btn = QPushButton("Create one")
+        switch_btn = QPushButton(self.tr("Create one"))
         switch_btn.setObjectName("linkButton")
         switch_btn.setCursor(Qt.PointingHandCursor)
         switch_btn.clicked.connect(lambda: self._show_signup())
@@ -106,24 +106,24 @@ class LoginWindow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
 
-        self.signup_name = self._field("Full name")
-        self.signup_email = self._field("Email")
-        self.signup_password = self._field("Password (min. 8 characters)", password=True)
-        self.signup_confirm = self._field("Confirm password", password=True)
+        self.signup_name = self._field(self.tr("Full name"))
+        self.signup_email = self._field(self.tr("Email"))
+        self.signup_password = self._field(self.tr("Password (min. 8 characters)"), password=True)
+        self.signup_confirm = self._field(self.tr("Confirm password"), password=True)
         self.signup_confirm.returnPressed.connect(self._do_signup)
         for w in [self.signup_name, self.signup_email, self.signup_password, self.signup_confirm]:
             lay.addWidget(w)
 
-        signup_btn = QPushButton("Create Account")
+        signup_btn = QPushButton(self.tr("Create Account"))
         signup_btn.setObjectName("primaryButton")
         signup_btn.setMinimumHeight(36)
         signup_btn.clicked.connect(self._do_signup)
         lay.addWidget(signup_btn)
 
         self.signup_switch_row = QHBoxLayout()
-        switch_lbl = QLabel("Already have an account?")
+        switch_lbl = QLabel(self.tr("Already have an account?"))
         switch_lbl.setObjectName("mutedLabel")
-        switch_btn = QPushButton("Sign in")
+        switch_btn = QPushButton(self.tr("Sign in"))
         switch_btn.setObjectName("linkButton")
         switch_btn.setCursor(Qt.PointingHandCursor)
         switch_btn.clicked.connect(self._show_login)
@@ -136,13 +136,13 @@ class LoginWindow(QWidget):
 
     def _show_login(self):
         self._clear_error()
-        self.title_lbl.setText("Sign in")
+        self.title_lbl.setText(self.tr("Sign in"))
         self.stack.setCurrentIndex(0)
         self.login_email.setFocus()
 
     def _show_signup(self):
         self._clear_error()
-        self.title_lbl.setText("Create account")
+        self.title_lbl.setText(self.tr("Create account"))
         self.stack.setCurrentIndex(1)
         self.signup_name.setFocus()
 
@@ -162,11 +162,11 @@ class LoginWindow(QWidget):
         email = self.login_email.text().strip()
         password = self.login_password.text()
         if not email or not password:
-            self._show_error("Enter your email and password.")
+            self._show_error(self.tr("Enter your email and password."))
             return
         user = auth_service.authenticate(email, password)
         if not user:
-            self._show_error("Incorrect email or password.")
+            self._show_error(self.tr("Incorrect email or password."))
             return
         if self.remember_cb.isChecked():
             self._remember(user)
@@ -178,7 +178,7 @@ class LoginWindow(QWidget):
         password = self.signup_password.text()
         confirm = self.signup_confirm.text()
         if password != confirm:
-            self._show_error("Passwords do not match.")
+            self._show_error(self.tr("Passwords do not match."))
             return
         try:
             user = auth_service.create_user(name, email, password)

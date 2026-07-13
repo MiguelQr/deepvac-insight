@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (
 from app.common import ICON_PATH, _nav_icon, _svg_icon
 from app.title_bar import TitleBar
 from app.tab_system import EditorArea
-from app.services import settings_service
+from app.services import settings_service, i18n_service
+from app.services.tcp_client import ChamberConnection
+from app.services.opc_broadcast_server import OpcBroadcastServer
 from app.views.dashboard  import DashboardMixin
 from app.views.runs       import RunsMixin
 from app.views.simulator  import SimulatorMixin
@@ -32,7 +34,7 @@ class DeepVacDesktop(
         self.splash = splash
         self.current_user     = current_user or {"id": None, "name": "User", "email": ""}
         self.logout_requested = False
-        self.setWindowTitle("DeepVac Dashboard")
+        self.setWindowTitle(self.tr("DeepVac Dashboard"))
         self.setWindowIcon(QIcon(ICON_PATH))
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.resize(1500, 920)
@@ -49,7 +51,18 @@ class DeepVacDesktop(
         self._sim_anim_total  = 0
         self._monitor_alarms  = []
 
+        self._chamber_connected = False
+        self.tcp         = ChamberConnection(self)
+        self.opc_server  = OpcBroadcastServer(self)
+
         self._build_ui()
+
+        self.tcp.connected.connect(self._on_chamber_connected)
+        self.tcp.disconnected.connect(self._on_chamber_disconnected)
+        self.tcp.connection_error.connect(self._mon_on_error)
+        self.tcp.sample_received.connect(self._mon_on_sample)
+        self.tcp.sample_received.connect(self.opc_server.broadcast)
+
         self.apply_theme()
         self.load_runs()
 
@@ -67,6 +80,22 @@ class DeepVacDesktop(
         except Exception as exc:
             print(f"[backup] periodic backup skipped: {exc}")
 
+    # ── Chamber connection (shared by Live Monitoring + OPC Server) ────────────
+
+    def _on_chamber_connected(self):
+        self._chamber_connected = True
+        self.title_bar.set_chamber_status(True)
+        self.title_bar.set_bell_active(True)
+        self._mon_set_connected(True)
+        self._opc_set_tcp_connected(True)
+
+    def _on_chamber_disconnected(self):
+        self._chamber_connected = False
+        self.title_bar.set_chamber_status(False)
+        self.title_bar.set_bell_active(False)
+        self._mon_set_connected(False)
+        self._opc_set_tcp_connected(False)
+
     # ── Persisted UI state ───────────────────────────────────────────────────
 
     def restore_window_state(self):
@@ -80,6 +109,10 @@ class DeepVacDesktop(
 
     def closeEvent(self, event):
         self._persist_ui_state()
+        if self.opc_server.is_running():
+            self.opc_server.stop()
+        if self.tcp.is_connected():
+            self.tcp.disconnect_from_host()
         super().closeEvent(event)
 
     def _persist_ui_state(self):
@@ -148,13 +181,13 @@ class DeepVacDesktop(
         lay.setSpacing(2)
 
         nav_defs = [
-            ("act_dashboard_btn", "house",        "Dashboard",  0),
-            ("act_runs_btn",      "database",     "Runs",       1),
-            ("act_analysis_btn",  "activity",     "Analysis",   2),
-            ("act_sim_btn",       "cpu",          "Simulator",  3),
-            ("act_reports_btn",   "file-earmark", "Reports",    4),
-            ("act_monitor_btn",   "graph-up",     "Monitor",    5),
-            ("act_opc_btn",       "broadcast",    "OPC Server", 6),
+            ("act_dashboard_btn", "house",        self.tr("Dashboard"),  0),
+            ("act_runs_btn",      "database",     self.tr("Runs"),       1),
+            ("act_analysis_btn",  "activity",     self.tr("Analysis"),   2),
+            ("act_sim_btn",       "cpu",          self.tr("Simulator"),  3),
+            ("act_reports_btn",   "file-earmark", self.tr("Reports"),    4),
+            ("act_monitor_btn",   "graph-up",     self.tr("Monitor"),    5),
+            ("act_opc_btn",       "broadcast",    self.tr("OPC Server"), 6),
         ]
         self._nav_buttons = []
         for attr, icon_name, label, idx in nav_defs:
@@ -175,7 +208,7 @@ class DeepVacDesktop(
         self.act_account_btn = QPushButton()
         self.act_account_btn.setObjectName("navButton")
         self.act_account_btn.setFixedSize(48, 46)
-        self.act_account_btn.setToolTip(self.current_user.get("name", "Account"))
+        self.act_account_btn.setToolTip(self.current_user.get("name") or self.tr("Account"))
         self.act_account_btn.setIconSize(QSize(22, 22))
         self.act_account_btn.clicked.connect(self._show_account_menu)
         lay.addWidget(self.act_account_btn)
@@ -183,7 +216,7 @@ class DeepVacDesktop(
         self.act_settings_btn = QPushButton()
         self.act_settings_btn.setObjectName("navButton")
         self.act_settings_btn.setFixedSize(48, 46)
-        self.act_settings_btn.setToolTip("Settings")
+        self.act_settings_btn.setToolTip(self.tr("Settings"))
         self.act_settings_btn.setIconSize(QSize(20, 20))
         self.act_settings_btn.clicked.connect(self._show_settings)
         lay.addWidget(self.act_settings_btn)
@@ -212,16 +245,26 @@ class DeepVacDesktop(
 
     def _show_settings(self):
         menu     = QMenu(self)
-        themes   = menu.addMenu("Themes")
-        act_dark  = themes.addAction("Dark")
+        themes   = menu.addMenu(self.tr("Themes"))
+        act_dark  = themes.addAction(self.tr("Dark"))
         act_dark.setCheckable(True)
         act_dark.setChecked(self.dark)
-        act_light = themes.addAction("Light")
+        act_light = themes.addAction(self.tr("Light"))
         act_light.setCheckable(True)
         act_light.setChecked(not self.dark)
+
+        languages = menu.addMenu(self.tr("Language"))
+        current_lang = settings_service.load_language()
+        lang_actions = {}
+        for code, name in i18n_service.AVAILABLE_LANGUAGES.items():
+            act = languages.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(code == current_lang)
+            lang_actions[act] = code
+
         menu.addSeparator()
-        act_backup_now    = menu.addAction("Back Up Now")
-        act_open_backups  = menu.addAction("Open Backups Folder")
+        act_backup_now    = menu.addAction(self.tr("Back Up Now"))
+        act_open_backups  = menu.addAction(self.tr("Open Backups Folder"))
         btn    = self.act_settings_btn
         chosen = menu.exec(btn.mapToGlobal(QPoint(btn.width() + 4, 0)))
         if chosen == act_dark and not self.dark:
@@ -234,22 +277,38 @@ class DeepVacDesktop(
             self._backup_now()
         elif chosen == act_open_backups:
             self._open_backups_folder()
+        elif chosen in lang_actions:
+            self._change_language(lang_actions[chosen])
 
     def toggle_theme(self):
         self.dark = not self.dark
         self.apply_theme()
 
+    def _change_language(self, code):
+        from PySide6.QtWidgets import QMessageBox
+        if code == settings_service.load_language():
+            return
+        settings_service.save_language(code)
+        QMessageBox.information(
+            self, self.tr("Language"),
+            self.tr("The new language will take effect the next time you start DeepVac."))
+
     def _backup_now(self):
+        from PySide6.QtCore import QCoreApplication
         from PySide6.QtWidgets import QMessageBox
         from app.services import backup_service
         try:
             results = backup_service.backup_all(force=True)
         except Exception as exc:
-            QMessageBox.critical(self, "Backup", f"Backup failed: {exc}")
+            QMessageBox.critical(self, self.tr("Backup"), self.tr("Backup failed: {0}").format(exc))
             return
+        # self.tr()'s %n/plural overload doesn't reliably resolve context in
+        # this PySide6 version -- call QCoreApplication.translate() directly
+        # with the exact context pyside6-lupdate recorded for this string.
         QMessageBox.information(
-            self, "Backup",
-            f"Backed up {len(results)} database(s) to data/backups/.")
+            self, self.tr("Backup"),
+            QCoreApplication.translate(
+                "DeepVacDesktop", "Backed up %n database(s) to data/backups/.", "", len(results)))
 
     def _open_backups_folder(self):
         from PySide6.QtCore import QUrl
@@ -262,11 +321,11 @@ class DeepVacDesktop(
 
     def _show_account_menu(self):
         menu = QMenu(self)
-        header = menu.addAction(self.current_user.get("name", "Account"))
+        header = menu.addAction(self.current_user.get("name") or self.tr("Account"))
         header.setEnabled(False)
         menu.addSeparator()
-        act_profile = menu.addAction("Profile")
-        act_logout  = menu.addAction("Log out")
+        act_profile = menu.addAction(self.tr("Profile"))
+        act_logout  = menu.addAction(self.tr("Log out"))
         btn    = self.act_account_btn
         chosen = menu.exec(btn.mapToGlobal(QPoint(btn.width() + 4, 0)))
         if chosen == act_profile:
@@ -279,7 +338,7 @@ class DeepVacDesktop(
         dlg = ProfileDialog(self.current_user, self)
         dlg.exec()
         self.current_user = dlg.updated_user
-        self.act_account_btn.setToolTip(self.current_user.get("name", "Account"))
+        self.act_account_btn.setToolTip(self.current_user.get("name") or self.tr("Account"))
 
     def _logout(self):
         from PySide6.QtCore import QSettings
@@ -642,3 +701,6 @@ class DeepVacDesktop(
         for p in [self._dash_cost_plot, self._dash_mae_plot, self._dash_ovr_plot]:
             p.setBackground(dash_bg)
         self._rebuild_nav_icons(c)
+        # _rebuild_nav_icons resets the bell to its neutral color; re-apply the
+        # live chamber-connection indicator so a theme toggle doesn't lose it.
+        self.title_bar.set_bell_active(self._chamber_connected)

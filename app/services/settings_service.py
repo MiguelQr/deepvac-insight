@@ -25,6 +25,17 @@ def save_theme(dark):
     _settings().setValue("ui/dark", bool(dark))
 
 
+# ── Language ─────────────────────────────────────────────────────────────
+
+def load_language(default="en"):
+    value = _settings().value("ui/language", default)
+    return value or default
+
+
+def save_language(code):
+    _settings().setValue("ui/language", str(code))
+
+
 # ── Window geometry ──────────────────────────────────────────────────────
 
 def load_window_geometry():

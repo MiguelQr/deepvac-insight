@@ -84,16 +84,16 @@ class RunTabPage(QWidget):
         toolbar.setContentsMargins(0, 0, 0, 0)
         toolbar.setSpacing(8)
 
-        self.title_label = QLabel("Loading…")
+        self.title_label = QLabel(self.tr("Loading…"))
         self.title_label.setObjectName("title")
         toolbar.addWidget(self.title_label)
 
         self.run_metric_labels = {}
-        for lbl, key in [("Samples", "samples"), ("Duration", "duration")]:
+        for lbl, key in [(self.tr("Samples"), "samples"), (self.tr("Duration"), "duration")]:
             toolbar.addWidget(self._inline_stat(lbl, key))
         toolbar.addStretch(1)
 
-        self._ch_btn = QPushButton("Channels ▾")
+        self._ch_btn = QPushButton(self.tr("Channels ▾"))
         self._ch_btn.setObjectName("secondaryButton")
         self._ch_btn.clicked.connect(self._open_channels_menu)
 
@@ -101,7 +101,7 @@ class RunTabPage(QWidget):
         self.chart_mode.addItems(["line", "scatter"])
         self.chart_mode.currentTextChanged.connect(self.refresh_chart)
 
-        self.show_setpoint = QCheckBox("Setpoint")
+        self.show_setpoint = QCheckBox(self.tr("Setpoint"))
         self.show_setpoint.setChecked(True)
         self.show_setpoint.stateChanged.connect(self.refresh_chart)
 
@@ -109,25 +109,25 @@ class RunTabPage(QWidget):
         self.setpoint_value.setFixedWidth(64)
         self.setpoint_value.textChanged.connect(self.refresh_chart)
 
-        reset_btn = QPushButton("Reset View")
+        reset_btn = QPushButton(self.tr("Reset View"))
         reset_btn.setIcon(_svg_icon("arrow-counterclockwise", "#94a3b8", 14))
         reset_btn.setIconSize(QSize(14, 14))
         reset_btn.clicked.connect(self._reset_views)
 
-        self._ann_btn = QPushButton("Annotate")
+        self._ann_btn = QPushButton(self.tr("Annotate"))
         self._ann_btn.setCheckable(True)
-        self._ann_btn.setToolTip("Drag on the chart to mark a time range")
+        self._ann_btn.setToolTip(self.tr("Drag on the chart to mark a time range"))
         self._ann_btn.toggled.connect(self._toggle_annotate_mode)
 
-        download = QPushButton("Export")
+        download = QPushButton(self.tr("Export"))
         download.setIcon(_svg_icon("download", "#ffffff", 14))
         download.setIconSize(QSize(14, 14))
         download.setObjectName("primaryButton")
         dl_menu = QMenu(download)
         for label, slot in [
-            ("Chart PNG",       self.export_chart_png),
-            ("Run CSV",         self.export_run_csv),
-            ("Comparison CSV",  self.export_comparison_csv),
+            (self.tr("Chart PNG"),      self.export_chart_png),
+            (self.tr("Run CSV"),        self.export_run_csv),
+            (self.tr("Comparison CSV"), self.export_comparison_csv),
         ]:
             act = QAction(label, dl_menu)
             act.triggered.connect(slot)
@@ -150,7 +150,7 @@ class RunTabPage(QWidget):
         ctrl_lay = QVBoxLayout(ctrl_card)
         ctrl_lay.setContentsMargins(10, 10, 10, 10)
         ctrl_lay.setSpacing(8)
-        ctrl_lay.addWidget(self._sec_lbl("PLOT CONTROLS"))
+        ctrl_lay.addWidget(self._sec_lbl(self.tr("PLOT CONTROLS")))
 
         time_row = QHBoxLayout()
         time_row.setSpacing(6)
@@ -162,9 +162,9 @@ class RunTabPage(QWidget):
         self.time_end.setRange(0, 1_000_000)
         self.time_end.setDecimals(1)
         self.time_end.setSuffix(" s")
-        apply_time = QPushButton("Apply Range")
+        apply_time = QPushButton(self.tr("Apply Range"))
         apply_time.clicked.connect(self._apply_time_range)
-        reset_time = QPushButton("Full Range")
+        reset_time = QPushButton(self.tr("Full Range"))
         reset_time.clicked.connect(self._reset_time_range)
         self.smoothing = QSpinBox()
         self.smoothing.setRange(1, 501)
@@ -172,27 +172,27 @@ class RunTabPage(QWidget):
         self.smoothing.setValue(1)
         self.smoothing.setSuffix(" pt")
         self.smoothing.valueChanged.connect(self._set_smoothing)
-        for w in [QLabel("Start"), self.time_start, QLabel("End"), self.time_end,
-                  apply_time, reset_time, QLabel("Smooth"), self.smoothing]:
+        for w in [QLabel(self.tr("Start")), self.time_start, QLabel(self.tr("End")), self.time_end,
+                  apply_time, reset_time, QLabel(self.tr("Smooth")), self.smoothing]:
             time_row.addWidget(w)
         time_row.addStretch(1)
         ctrl_lay.addLayout(time_row)
 
         ov_row = QHBoxLayout()
         ov_row.setSpacing(12)
-        ov_row.addWidget(QLabel("Overlays"))
-        self.overlay_min = QCheckBox("Min")
-        self.overlay_max = QCheckBox("Max")
-        self.overlay_avg = QCheckBox("Average")
+        ov_row.addWidget(QLabel(self.tr("Overlays")))
+        self.overlay_min = QCheckBox(self.tr("Min"))
+        self.overlay_max = QCheckBox(self.tr("Max"))
+        self.overlay_avg = QCheckBox(self.tr("Average"))
         for cb in [self.overlay_min, self.overlay_max, self.overlay_avg]:
             cb.stateChanged.connect(self._update_overlays)
             ov_row.addWidget(cb)
         ov_row.addSpacing(20)
-        ov_row.addWidget(QLabel("Markers"))
-        self.mk_events = QCheckBox("Events")
-        self.mk_alarms = QCheckBox("Alarms")
-        self.mk_ctrl   = QCheckBox("Controller")
-        self.mk_state  = QCheckBox("State")
+        ov_row.addWidget(QLabel(self.tr("Markers")))
+        self.mk_events = QCheckBox(self.tr("Events"))
+        self.mk_alarms = QCheckBox(self.tr("Alarms"))
+        self.mk_ctrl   = QCheckBox(self.tr("Controller"))
+        self.mk_state  = QCheckBox(self.tr("State"))
         for cb in [self.mk_events, self.mk_alarms, self.mk_ctrl, self.mk_state]:
             cb.setChecked(True)
             cb.stateChanged.connect(self._update_markers)
@@ -235,7 +235,7 @@ class RunTabPage(QWidget):
         try:
             self.detail = data.run_detail(self.run_key)
         except Exception as exc:
-            QMessageBox.critical(self, "Load error", str(exc))
+            QMessageBox.critical(self, self.tr("Load error"), str(exc))
             return
         if not any(c in self.detail["numeric_columns"] for c in self.selected_columns):
             numeric_cols = self.detail["numeric_columns"]
@@ -302,7 +302,8 @@ class RunTabPage(QWidget):
     def _update_ch_btn_label(self):
         cols = (self.detail or {}).get("numeric_columns", [])
         n = len(self.selected_columns)
-        self._ch_btn.setText(f"Channels ({n}/{len(cols)}) ▾" if cols else "Channels ▾")
+        self._ch_btn.setText(
+            self.tr("Channels ({0}/{1}) ▾").format(n, len(cols)) if cols else self.tr("Channels ▾"))
 
     def _open_channels_menu(self):
         if not self.detail:
@@ -346,7 +347,7 @@ class RunTabPage(QWidget):
     def _pick_channel_color(self, col, menu):
         menu.close()
         current = QColor(self._channel_colors.get(col, COLORS[0]))
-        picked  = QColorDialog.getColor(current, self, f"Color — {col}")
+        picked  = QColorDialog.getColor(current, self, self.tr("Color — {0}").format(col))
         if picked.isValid():
             self._channel_colors[col] = picked.name()
             self.refresh_chart()
@@ -369,7 +370,7 @@ class RunTabPage(QWidget):
             else:
                 self.series = data.run_series(self.run_key, cols)
         except Exception as exc:
-            QMessageBox.critical(self, "Series error", str(exc))
+            QMessageBox.critical(self, self.tr("Series error"), str(exc))
             return
         self.refresh_chart()
 
@@ -439,7 +440,7 @@ class RunTabPage(QWidget):
 
     def _toggle_annotate_mode(self, checked: bool):
         self.chart.set_annotate_mode(checked)
-        self._ann_btn.setText("Done" if checked else "Annotate")
+        self._ann_btn.setText(self.tr("Done") if checked else self.tr("Annotate"))
 
     def _on_annotation_committed(self, ann: dict):
         saved = annotations_service.add_annotation(
@@ -476,8 +477,8 @@ class RunTabPage(QWidget):
             swatch = QLabel("■")
             swatch.setStyleSheet(f"color: {ann['color']}; background: transparent; font-size: 14px;")
             desc = QLabel(
-                f"<b>{ann['label']}</b>  ·  {ann['x0']:.1f} – {ann['x1']:.1f} s"
-                f"  ·  {ann.get('user_name', 'Unknown')}"
+                self.tr("<b>{0}</b>  ·  {1:.1f} – {2:.1f} s  ·  {3}").format(
+                    ann['label'], ann['x0'], ann['x1'], ann.get('user_name', 'Unknown'))
             )
             desc.setStyleSheet("background: transparent;")
             del_btn = QPushButton("✕")
@@ -500,8 +501,8 @@ class RunTabPage(QWidget):
         lay.setContentsMargins(10, 10, 10, 10)
         lay.setSpacing(6)
         hdr = QHBoxLayout()
-        hdr.addWidget(self._sec_lbl("ANNOTATIONS"))
-        info = QLabel("Click 'Annotate', then drag on the chart to mark a time range and label it.")
+        hdr.addWidget(self._sec_lbl(self.tr("ANNOTATIONS")))
+        info = QLabel(self.tr("Click 'Annotate', then drag on the chart to mark a time range and label it."))
         info.setObjectName("sectionLabel")
         info.setWordWrap(True)
         hdr.addWidget(info, 1)
@@ -523,8 +524,8 @@ class RunTabPage(QWidget):
         lay.setSpacing(8)
 
         hdr = QHBoxLayout()
-        hdr.addWidget(self._sec_lbl("VARIABLE RULES"))
-        info = QLabel("Highlight acceptable ranges on the Y-axis when the channel is plotted.")
+        hdr.addWidget(self._sec_lbl(self.tr("VARIABLE RULES")))
+        info = QLabel(self.tr("Highlight acceptable ranges on the Y-axis when the channel is plotted."))
         info.setObjectName("sectionLabel")
         info.setWordWrap(True)
         hdr.addWidget(info, 1)
@@ -535,25 +536,25 @@ class RunTabPage(QWidget):
         self._rule_ch_combo = QComboBox()
         self._rule_ch_combo.setFixedWidth(110)
         self._rule_lo_ed = QLineEdit()
-        self._rule_lo_ed.setPlaceholderText("min")
+        self._rule_lo_ed.setPlaceholderText(self.tr("min"))
         self._rule_lo_ed.setFixedWidth(72)
         self._rule_hi_ed = QLineEdit()
-        self._rule_hi_ed.setPlaceholderText("max")
+        self._rule_hi_ed.setPlaceholderText(self.tr("max"))
         self._rule_hi_ed.setFixedWidth(72)
         self._rule_name_ed = QLineEdit()
-        self._rule_name_ed.setPlaceholderText("label")
+        self._rule_name_ed.setPlaceholderText(self.tr("label"))
         self._rule_name_ed.setFixedWidth(100)
         self._rule_color_combo = QComboBox()
         for name, _ in RULE_COLOR_OPTIONS:
-            self._rule_color_combo.addItem(name)
+            self._rule_color_combo.addItem(self.tr(name))
         self._rule_color_combo.setFixedWidth(90)
-        add_btn = QPushButton("Add Rule")
+        add_btn = QPushButton(self.tr("Add Rule"))
         add_btn.setObjectName("primaryButton")
         add_btn.clicked.connect(self._add_var_rule)
 
-        for cap, w in [("Channel", self._rule_ch_combo), ("Min", self._rule_lo_ed),
-                       ("Max", self._rule_hi_ed),         ("Label", self._rule_name_ed),
-                       ("Color", self._rule_color_combo), ("", add_btn)]:
+        for cap, w in [(self.tr("Channel"), self._rule_ch_combo), (self.tr("Min"), self._rule_lo_ed),
+                       (self.tr("Max"), self._rule_hi_ed),         (self.tr("Label"), self._rule_name_ed),
+                       (self.tr("Color"), self._rule_color_combo), ("", add_btn)]:
             if cap:
                 lbl = QLabel(cap)
                 lbl.setObjectName("sectionLabel")
@@ -633,8 +634,8 @@ class RunTabPage(QWidget):
             lo_str = f"{rule['lo']:g}" if rule["lo"] is not None else "−∞"
             hi_str = f"{rule['hi']:g}" if rule["hi"] is not None else "+∞"
             desc = QLabel(
-                f"<b>{rule['name']}</b>  ·  {rule['channel']}  [{lo_str} , {hi_str}]"
-                f"  ·  {rule.get('user_name', 'Unknown')}"
+                self.tr("<b>{0}</b>  ·  {1}  [{2} , {3}]  ·  {4}").format(
+                    rule['name'], rule['channel'], lo_str, hi_str, rule.get('user_name', 'Unknown'))
             )
             desc.setStyleSheet("background: transparent;")
             del_btn = QPushButton("✕")
@@ -657,9 +658,9 @@ class RunTabPage(QWidget):
             if lo is not None and hi is not None:
                 self.chart.add_range_band(lo, hi, color, name)
             elif lo is not None:
-                self.chart.add_horizontal_marker(lo, f"{name} min", color, overlay=True)
+                self.chart.add_horizontal_marker(lo, self.tr("{0} min").format(name), color, overlay=True)
             elif hi is not None:
-                self.chart.add_horizontal_marker(hi, f"{name} max", color, overlay=True)
+                self.chart.add_horizontal_marker(hi, self.tr("{0} max").format(name), color, overlay=True)
 
     # ── Exports ──────────────────────────────────────────────────────────────
 
@@ -667,7 +668,7 @@ class RunTabPage(QWidget):
         if not self.detail:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save chart", f"{self.detail['run']['id']}.png", "PNG (*.png)")
+            self, self.tr("Save chart"), f"{self.detail['run']['id']}.png", self.tr("PNG (*.png)"))
         if path:
             self.chart.export_view(path)
 
@@ -676,8 +677,8 @@ class RunTabPage(QWidget):
             return
         table = data.run_table(self.run_key)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save run CSV",
-            f"{self.detail['run']['id']}-samples.csv", "CSV (*.csv)")
+            self, self.tr("Save run CSV"),
+            f"{self.detail['run']['id']}-samples.csv", self.tr("CSV (*.csv)"))
         if path:
             with open(path, "w", newline="", encoding="utf-8") as fh:
                 writer = csv.DictWriter(fh, fieldnames=table["columns"])
@@ -686,7 +687,7 @@ class RunTabPage(QWidget):
 
     def export_comparison_csv(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save comparison CSV", "deepvac-comparison.csv", "CSV (*.csv)")
+            self, self.tr("Save comparison CSV"), "deepvac-comparison.csv", self.tr("CSV (*.csv)"))
         if not path:
             return
         rows  = [r for r in self.all_runs if r["key"] in (self.compare_runs or {self.run_key})]

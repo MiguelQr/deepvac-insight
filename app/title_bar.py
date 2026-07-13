@@ -27,7 +27,7 @@ class TitleBar(QWidget):
         if not pix.isNull():
             lbl.setPixmap(pix.scaledToHeight(22, Qt.SmoothTransformation))
         else:
-            lbl.setText("DEEPVAC")
+            lbl.setText(self.tr("DEEPVAC"))
             lbl.setObjectName("titleBarBrand")
         lbl.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         ll.addWidget(lbl)
@@ -35,14 +35,15 @@ class TitleBar(QWidget):
 
         lay.addStretch(1)
 
-        self.center_btn = QPushButton("⌕   DeepVac Dashboard")
+        self.center_btn = QPushButton(self.tr("⌕   DeepVac Dashboard"))
         self.center_btn.setObjectName("titleCenter")
         self.center_btn.setFixedSize(320, 26)
         lay.addWidget(self.center_btn)
 
         lay.addStretch(1)
 
-        self.status_chamber = self._status_pill("broadcast",    "Chamber Offline", "#ef4444", "statusText")
+        self.status_chamber = self._status_pill(
+            "broadcast", self.tr("Chamber Offline"), "#ef4444", "statusText")
         lay.addWidget(self.status_chamber)
         lay.addSpacing(4)
 
@@ -50,7 +51,7 @@ class TitleBar(QWidget):
         self.btn_bell.setObjectName("titleIconBtn")
         self.btn_bell.setFixedSize(32, 40)
         self.btn_bell.setFocusPolicy(Qt.NoFocus)
-        self.btn_bell.setToolTip("Notifications")
+        self.btn_bell.setToolTip(self.tr("Notifications"))
         self.btn_bell.setIcon(_svg_icon("bell", "#94a3b8", 16))
         self.btn_bell.setIconSize(QSize(16, 16))
         lay.addWidget(self.btn_bell)
@@ -97,7 +98,14 @@ class TitleBar(QWidget):
     def set_chamber_status(self, online):
         color = "#22c55e" if online else "#ef4444"
         self.status_chamber._icon.setPixmap(_render_svg("broadcast", color, 14))
-        self.status_chamber._txt.setText("Chamber Online" if online else "Chamber Offline")
+        self.status_chamber._txt.setText(
+            self.tr("Chamber Online") if online else self.tr("Chamber Offline"))
+
+    def set_bell_active(self, active):
+        color = "#60a5fa" if active else "#94a3b8"
+        self.btn_bell.setIcon(_svg_icon("bell", color, 16))
+        self.btn_bell.setToolTip(
+            self.tr("Notifications — chamber connected") if active else self.tr("Notifications"))
 
     def _toggle_max(self):
         if self._win.isMaximized():

@@ -132,8 +132,8 @@ class ChartWidget(QWidget):
         self.plot.setMinimumHeight(400)
         self.plot.setBackground("#111827")
         self.plot.showGrid(x=True, y=True, alpha=0.28)
-        self.plot.setLabel("bottom", "Time elapsed (s)")
-        self.plot.setLabel("left", "Value")
+        self.plot.setLabel("bottom", self.tr("Time elapsed (s)"))
+        self.plot.setLabel("left", self.tr("Value"))
         self.legend = self.plot.addLegend(offset=(-12, 12))
         self.plot.setMouseEnabled(x=True, y=True)
         self.plot.getViewBox().setMouseMode(pg.ViewBox.PanMode)
@@ -195,7 +195,7 @@ class ChartWidget(QWidget):
         self.hover_points = []
         self.plot.setLabel("left", self.y_axis_label())
         if not self.datasets:
-            self.plot.setTitle("No chart data")
+            self.plot.setTitle(self.tr("No chart data"))
             return
         self.plot.setTitle("")
         for index, dataset in enumerate(self.datasets):
@@ -223,7 +223,8 @@ class ChartWidget(QWidget):
         self.draw_annotations()
         self.draw_overlays()
         if setpoint is not None:
-            self.add_horizontal_marker(setpoint, f"Setpoint {fmt(setpoint, 2)}", "#94a3b8")
+            self.add_horizontal_marker(
+                setpoint, self.tr("Setpoint {0}").format(fmt(setpoint, 2)), "#94a3b8")
         if self.auto_range_on_draw:
             self.plot.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
             self.plot.autoRange()
@@ -295,7 +296,7 @@ class ChartWidget(QWidget):
 
     def y_axis_label(self):
         labels = " ".join(ds["label"].lower() for ds in self.datasets)
-        return "Temperature [deg C]" if "temp" in labels else "Value"
+        return self.tr("Temperature [deg C]") if "temp" in labels else self.tr("Value")
 
     def _datasets(self, payload):
         if not payload:
@@ -341,11 +342,14 @@ class ChartWidget(QWidget):
             return
         ys = np.array([p[1] for p in all_points], dtype=float)
         if self.overlay_flags.get("min"):
-            self.add_horizontal_marker(float(np.min(ys)), f"Min {fmt(np.min(ys), 3)}", "#51d6c7", overlay=True)
+            self.add_horizontal_marker(
+                float(np.min(ys)), self.tr("Min {0}").format(fmt(np.min(ys), 3)), "#51d6c7", overlay=True)
         if self.overlay_flags.get("max"):
-            self.add_horizontal_marker(float(np.max(ys)), f"Max {fmt(np.max(ys), 3)}", "#ff6f7d", overlay=True)
+            self.add_horizontal_marker(
+                float(np.max(ys)), self.tr("Max {0}").format(fmt(np.max(ys), 3)), "#ff6f7d", overlay=True)
         if self.overlay_flags.get("avg"):
-            self.add_horizontal_marker(float(np.mean(ys)), f"Avg {fmt(np.mean(ys), 3)}", "#f2bd52", overlay=True)
+            self.add_horizontal_marker(
+                float(np.mean(ys)), self.tr("Avg {0}").format(fmt(np.mean(ys), 3)), "#f2bd52", overlay=True)
 
     def draw_annotations(self):
         for ann in self.annotations:
@@ -356,14 +360,14 @@ class ChartWidget(QWidget):
                      "controller": "#f2bd52", "state": "#b792ff"}.get(cat, "#94a3b8")
             atype = ann.get("type")
             if atype == "line-x":
-                self.add_vertical_marker(ann.get("x"), ann.get("label", "Marker"), color)
+                self.add_vertical_marker(ann.get("x"), ann.get("label", self.tr("Marker")), color)
             elif atype == "line-y":
-                self.add_horizontal_marker(ann.get("y"), ann.get("label", "Marker"), color)
+                self.add_horizontal_marker(ann.get("y"), ann.get("label", self.tr("Marker")), color)
             elif atype == "point":
                 item = pg.ScatterPlotItem(
                     [ann.get("x")], [ann.get("y")], size=9,
                     brush=pg.mkBrush(color), pen=pg.mkPen("#111827", width=1),
-                    name=ann.get("label", "Event"))
+                    name=ann.get("label", self.tr("Event")))
                 self.plot.addItem(item)
                 self.marker_items.append(item)
             elif atype == "region-x":
@@ -465,25 +469,25 @@ class ChartWidget(QWidget):
     def _on_annotate_drag(self, x0, x1):
         self._ann_preview.setVisible(False)
         dlg = QDialog(self)
-        dlg.setWindowTitle("Add Annotation")
+        dlg.setWindowTitle(self.tr("Add Annotation"))
         lay = QVBoxLayout(dlg)
         form = QHBoxLayout()
         form.setSpacing(8)
-        form.addWidget(QLabel("Label:"))
+        form.addWidget(QLabel(self.tr("Label:")))
         label_ed = QLineEdit()
-        label_ed.setPlaceholderText("e.g. Steady state")
+        label_ed.setPlaceholderText(self.tr("e.g. Steady state"))
         form.addWidget(label_ed)
-        form.addWidget(QLabel("Color:"))
+        form.addWidget(QLabel(self.tr("Color:")))
         color_combo = QComboBox()
         for name, _ in RULE_COLOR_OPTIONS:
-            color_combo.addItem(name)
+            color_combo.addItem(self.tr(name))
         form.addWidget(color_combo)
         lay.addLayout(form)
         btns = QHBoxLayout()
         btns.addStretch()
-        cancel_btn = QPushButton("Cancel")
+        cancel_btn = QPushButton(self.tr("Cancel"))
         cancel_btn.clicked.connect(dlg.reject)
-        ok_btn = QPushButton("Add")
+        ok_btn = QPushButton(self.tr("Add"))
         ok_btn.setObjectName("primaryButton")
         ok_btn.clicked.connect(dlg.accept)
         ok_btn.setDefault(True)
@@ -492,7 +496,7 @@ class ChartWidget(QWidget):
         lay.addLayout(btns)
         if dlg.exec() == QDialog.Accepted:
             _, color = RULE_COLOR_OPTIONS[color_combo.currentIndex()]
-            text = label_ed.text().strip() or f"t={x0:.1f}–{x1:.1f} s"
+            text = label_ed.text().strip() or self.tr("t={0:.1f}–{1:.1f} s").format(x0, x1)
             self.annotation_committed.emit({"x0": x0, "x1": x1, "label": text, "color": color})
 
     def on_mouse_moved(self, scene_pos):
@@ -515,7 +519,9 @@ class ChartWidget(QWidget):
             self.hover_label.setVisible(False)
             return
         self.hover_label.setText(
-            f"{best['label']}\nTime: {fmt(best['x'], 1)} s\nValue: {fmt(best['y'], 3)}")
+            best['label'] + "\n" +
+            self.tr("Time: {0} s").format(fmt(best['x'], 1)) + "\n" +
+            self.tr("Value: {0}").format(fmt(best['y'], 3)))
         self.hover_label.setColor(best["color"])
         self.hover_label.setPos(best["x"], best["y"])
         self.hover_label.setVisible(True)
@@ -530,7 +536,9 @@ class ChartWidget(QWidget):
             vr = self.plot.getViewBox().viewRange()[0]
             if abs(best["x"] - x) <= (vr[1] - vr[0]) * 0.04:
                 self.hover_label.setText(
-                    f"{best['label']}\nTime: {fmt(best['x'], 1)} s\nValue: {fmt(best['y'], 3)}")
+                    best['label'] + "\n" +
+            self.tr("Time: {0} s").format(fmt(best['x'], 1)) + "\n" +
+            self.tr("Value: {0}").format(fmt(best['y'], 3)))
                 self.hover_label.setColor(best["color"])
                 self.hover_label.setPos(best["x"], best["y"])
                 self.hover_label.setVisible(True)
