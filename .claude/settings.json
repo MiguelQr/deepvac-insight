@@ -85,7 +85,20 @@
       "Bash(pyside6-lupdate.exe -extensions py -recursive app -ts resources/i18n/deepvac_es.ts resources/i18n/deepvac_de.ts)",
       "Read(//c/Users/mike_/.conda/envs/deepapp/**)",
       "Read(//dev/**)",
-      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I \"C:\\\\Users\\\\mike_\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-mike--Desktop-deepvac-insight\\\\7992bfea-42b7-4f76-b038-53669d54b380\\\\scratchpad\\\\repair_plurals.py\")"
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I \"C:\\\\Users\\\\mike_\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-mike--Desktop-deepvac-insight\\\\7992bfea-42b7-4f76-b038-53669d54b380\\\\scratchpad\\\\repair_plurals.py\")",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -c \"import PyInstaller; print\\(PyInstaller.__version__\\)\")",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -c \"import PIL; print\\(PIL.__version__\\)\")",
+      "Read(//c/Program Files \\\\\\(x86\\\\\\)/**)",
+      "Bash(where iscc.exe)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m py_compile app/common.py)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -m pip install pyinstaller --quiet)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -c \"import PyInstaller; print\\('PyInstaller', PyInstaller.__version__\\)\")",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m pip install pyinstaller --quiet)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -c \"import pyinstaller_hooks_contrib\")",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m pip install pyinstaller-hooks-contrib --quiet)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m PyInstaller deepvac.spec --noconfirm --clean)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(timeout 20 ./dist/DeepVac/DeepVac.exe)"
     ],
     "additionalDirectories": [
       "C:\\Users\\mike_\\AppData\\Local\\Temp\\claude\\c--Users-mike--Desktop-deepvac-insight\\7992bfea-42b7-4f76-b038-53669d54b380\\scratchpad"

@@ -1,15 +1,28 @@
 """Shared constants, pure utilities, and SVG icon helpers used across all modules."""
 import csv
 import json
+import os
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 
-PROJECT_ROOT  = Path(__file__).resolve().parent.parent
-RESOURCES_DIR = PROJECT_ROOT / "resources"
-DATA_DIR      = PROJECT_ROOT / "data"
+if getattr(sys, "frozen", False):
+    # Running from a PyInstaller bundle: bundled read-only resources (icons,
+    # translations, the model checkpoint) live under the bundle directory
+    # (sys._MEIPASS for --onefile, the exe's own folder for --onedir -- both
+    # are exposed via _MEIPASS). That directory may be inside Program Files
+    # and isn't guaranteed writable, so user-writable state (databases,
+    # logs, backups, generated reports) goes to %LOCALAPPDATA% instead,
+    # which is what a real Windows install is expected to do.
+    RESOURCES_DIR = Path(sys._MEIPASS) / "resources"
+    DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "DeepVac" / "data"
+else:
+    PROJECT_ROOT  = Path(__file__).resolve().parent.parent
+    RESOURCES_DIR = PROJECT_ROOT / "resources"
+    DATA_DIR      = PROJECT_ROOT / "data"
 REPORTS_DIR   = DATA_DIR / "reports"
 
 LOGO_PATH = str(RESOURCES_DIR / "logo.png")

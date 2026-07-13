@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepvac-insight"
+version = "0.1.0"
+description = "Desktop app for reviewing thermal-chamber PID test runs, GRU-based closed-loop simulation, and live chamber monitoring."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6==6.11.1",
+    "pyqtgraph==0.14.0",
+    "pandas==2.3.3",
+    "numpy==2.2.6",
+    "openpyxl==3.1.5",
+    "torch==2.12.1",
+]
+
+[project.scripts]
+deepvac-insight = "app.app:main"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["model/*.pt"]
+
+# Not declared here: resources/ and data/ live at the repo root, outside the
+# app/ package, and app/common.py locates them relative to the source tree
+# (or, when frozen, relative to the PyInstaller bundle -- see
+# common.py/build/deepvac.spec). A `pip install` of this package alone
+# will not carry resources/ with it; this pyproject.toml exists to give the
+# project real, declared metadata and a console entry point, not to make
+# `pip install deepvac-insight` from PyPI a supported distribution path.
+# The supported "hand this to a non-developer" path is the PyInstaller
+# build in build/deepvac.spec (see README).

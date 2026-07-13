@@ -1,2 +1,15 @@
 summary.txt
 tcp/
+
+# Runtime data: sqlite caches/DBs, logs, backups, generated reports -- none
+# of this is source, all of it is regenerated/recreated on first run.
+data/
+
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller build output
+build/
+dist/
+*.spec.bak

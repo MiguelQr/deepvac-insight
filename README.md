@@ -47,6 +47,15 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+## Building a distributable
+
+To hand this to someone without a Python/conda setup, freeze it with
+PyInstaller and wrap that into a Windows installer with Inno Setup — see
+[installer/README.md](installer/README.md) for the two-step process
+(`pyinstaller deepvac.spec` then `iscc installer\deepvac.iss`). The
+installed app keeps its own data in `%LOCALAPPDATA%\DeepVac\data`,
+separate from wherever it's installed.
+
 ## Local run database
 
 On startup, the app syncs the current run history into:
