@@ -8,8 +8,23 @@ data/
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
+
+# uv-managed virtualenv
+.venv/
 
 # PyInstaller build output
 build/
 dist/
 *.spec.bak
+
+# pytest / coverage output
+.pytest_cache/
+.coverage
+coverage.xml
+coverage.json
+htmlcov/
+test-results/
+
+# Inno Setup output
+installer/output/

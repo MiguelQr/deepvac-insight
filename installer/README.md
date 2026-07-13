@@ -6,8 +6,8 @@ Windows installer with Inno Setup.
 ## 1. Freeze the app
 
 ```
-pip install pyinstaller pyinstaller-hooks-contrib
-pyinstaller deepvac.spec --clean
+uv sync --extra dev
+uv run pyinstaller deepvac.spec --clean
 ```
 
 Output goes to `dist/DeepVac/DeepVac.exe`.
@@ -29,7 +29,7 @@ shortcut, and a standard uninstaller (Add/Remove Programs).
 
 - The app itself: wherever the installer put it.
 - User data (the sqlite databases, logs, backups, generated reports):
-  `%LOCALAPPDATA%\DeepVac\data`, created by the app on first run. 
+  `%LOCALAPPDATA%\DeepVac\data`, created by the app on first run.
 
 ## Known limitations
 

@@ -37,14 +37,23 @@ insight/
 
 ## Install
 
+Dependencies are declared in `pyproject.toml` (the single source of truth --
+there is no separate `requirements.txt` to keep in sync with it). Managed
+with [uv](https://docs.astral.sh/uv/):
+
 ```powershell
-python -m pip install -r requirements.txt
+uv sync --extra dev
 ```
+
+This creates a `.venv` with the app's runtime dependencies plus the dev
+toolchain (pytest, ruff, mypy, pre-commit, pip-audit, pyinstaller). See
+[docs/testing.md](docs/testing.md) and [CONTRIBUTING.md](CONTRIBUTING.md)
+for the full local dev-loop.
 
 ## Run
 
 ```powershell
-python main.py
+uv run python main.py
 ```
 
 ## Building a distributable
