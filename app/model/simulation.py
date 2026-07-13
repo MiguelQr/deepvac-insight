@@ -5,16 +5,36 @@ in-process: the trained GRU predicts the next temperature, and a Python
 reimplementation of the CODESYS ChamberPID/Diff blocks drives the control
 signal that feeds back into the model on the next step.
 """
+
 from __future__ import annotations
 
 import sys
 import types
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Protocol, cast
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
+
+
+class _Scaler(Protocol):
+    """Shape checkpoint["x_scaler"]/["y_scaler"] are expected to have --
+    matches sklearn.preprocessing.StandardScaler and the minimal stub
+    registered by _ensure_sklearn_stub() below. checkpoint is typed as
+    dict[str, object] (its values are heterogeneous: tensors, ints, these
+    scalers, ...), so this Protocol + cast() is how callers get a typed
+    view of the two entries they actually call methods on."""
+
+    def transform(self, X: np.ndarray) -> np.ndarray: ...
+    def inverse_transform(self, X: np.ndarray) -> np.ndarray: ...
+
+
+# compute_metrics()/simulate_candidate()'s per-candidate result: mostly
+# float, but candidate_id is int, valid is bool, and invalid_reason is str.
+Metrics = dict[str, float | int | bool | str]
 
 
 def _ensure_sklearn_stub() -> None:
@@ -31,15 +51,24 @@ def _ensure_sklearn_stub() -> None:
         return
 
     class _StandardScaler:
+        # Not set in __init__: pickle restores these directly onto the
+        # instance (via __setstate__/__dict__) when unpickling a real
+        # fitted sklearn.preprocessing.StandardScaler, bypassing __init__
+        # entirely -- these annotations just describe that shape to mypy.
+        mean_: np.ndarray
+        scale_: np.ndarray
+
         def transform(self, X: np.ndarray) -> np.ndarray:
-            return (X - self.mean_) / self.scale_
+            # numpy's operator stubs don't always preserve a concrete
+            # ndarray type through arithmetic -- cast back at the boundary.
+            return cast(np.ndarray, (X - self.mean_) / self.scale_)
 
         def inverse_transform(self, X: np.ndarray) -> np.ndarray:
-            return X * self.scale_ + self.mean_
+            return cast(np.ndarray, X * self.scale_ + self.mean_)
 
     def _pkg(name: str) -> types.ModuleType:
         m = types.ModuleType(name)
-        m.__path__ = []  # type: ignore[attr-defined]  # marks it as a package
+        m.__path__ = []  # marks it as a package so submodule lookups work
         m.__package__ = name
         return m
 
@@ -100,8 +129,13 @@ class GRUModel(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out, _ = self.gru(x)
-        return self.head(out[:, -1, :])
+        # torch's own stubs type nn.Module.__call__ as returning Any (true
+        # of every nn.Module, not specific to GRU/Sequential here) -- these
+        # two annotations are what reclaim a concrete Tensor type at this
+        # module's boundary rather than leaking Any into every caller.
+        out: torch.Tensor = self.gru(x)[0]
+        head_out: torch.Tensor = self.head(out[:, -1, :])
+        return head_out
 
 
 def limit(low: float, x: float, high: float) -> float:
@@ -152,7 +186,7 @@ class ChamberPID:
         i_coef: float,
         d_coef: float,
         diff_out: float,
-    ) -> Tuple[float, float, float, float]:
+    ) -> tuple[float, float, float, float]:
         if not enable:
             self.p_part = 0.0
             self.i_part = 0.0
@@ -192,7 +226,7 @@ class ChamberPID:
 def load_model(
     checkpoint_path: Path,
     device: torch.device,
-) -> Tuple[GRUModel, Dict[str, object]]:
+) -> tuple[GRUModel, dict[str, object]]:
     _ensure_sklearn_stub()
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
@@ -211,17 +245,17 @@ def load_model(
 
 def predict_delta_t1(
     model: GRUModel,
-    checkpoint: Dict[str, object],
+    checkpoint: dict[str, object],
     feature_window: np.ndarray,
     device: torch.device,
 ) -> float:
-    x_scaler = checkpoint["x_scaler"]
-    y_scaler = checkpoint["y_scaler"]
+    x_scaler = cast(_Scaler, checkpoint["x_scaler"])
+    y_scaler = cast(_Scaler, checkpoint["y_scaler"])
 
     n_features = feature_window.shape[-1]
-    x_scaled = x_scaler.transform(
-        feature_window.reshape(-1, n_features)
-    ).reshape(feature_window.shape)
+    x_scaled = x_scaler.transform(feature_window.reshape(-1, n_features)).reshape(
+        feature_window.shape
+    )
 
     xb = torch.as_tensor(x_scaled[None, :, :], dtype=torch.float32, device=device)
 
@@ -308,7 +342,7 @@ def run_pid_substeps(
     dt_s: float,
     period_s: float,
     feature_scale: float,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Run the CODESYS-style PID/Diff at internal ``period_s`` substeps.
 
     In closed-loop mode the future true temperature is unknown, so the
@@ -353,7 +387,7 @@ def run_pid_substeps(
 def predict_next(
     *,
     model: GRUModel,
-    checkpoint: Dict[str, object],
+    checkpoint: dict[str, object],
     feature_window: np.ndarray,
     feature_names: Sequence[str],
     device: torch.device,
@@ -361,11 +395,11 @@ def predict_next(
     previous_temp: float,
     temp_ref: float,
     dt_s: float,
-    terms: Dict[str, float],
+    terms: dict[str, float],
     kp: float,
     ki: float,
     kd: float,
-) -> Tuple[float, float, np.ndarray]:
+) -> tuple[float, float, np.ndarray]:
     local_window = feature_window.copy()
     local_window[-1, :] = make_feature_row(
         feature_names,
@@ -392,15 +426,13 @@ def simulate_candidate(
     ki: float,
     kd: float,
     model: GRUModel,
-    checkpoint: Dict[str, object],
+    checkpoint: dict[str, object],
     feature_names: Sequence[str],
     window_steps: int,
     args: Any,
     device: torch.device,
     save_trajectory: bool = False,
-) -> Tuple[Dict[str, float], "pd.DataFrame | None"]:
-    import pandas as pd
-
+) -> tuple[Metrics, pd.DataFrame | None]:
     start_temp = float(args.start_temp)
     target_temp = float(args.target_temp)
     duration_s = float(args.duration_s)
@@ -432,55 +464,78 @@ def simulate_candidate(
 
     current_temp = start_temp
     previous_temp = start_temp
-    rows: List[Dict[str, float]] = []
-    temps: List[float] = []
-    times: List[float] = []
+    rows: list[dict[str, float]] = []
+    temps: list[float] = []
+    times: list[float] = []
 
     valid = True
     invalid_reason = ""
 
     for step in range(n_steps):
         terms = run_pid_substeps(
-            pid=pid, diff=diff, temp_start=current_temp,
-            temp_ref=target_temp, kp=kp, ki=ki, kd=kd,
-            dt_s=dt_s, period_s=args.pid_period_s,
+            pid=pid,
+            diff=diff,
+            temp_start=current_temp,
+            temp_ref=target_temp,
+            kp=kp,
+            ki=ki,
+            kd=kd,
+            dt_s=dt_s,
+            period_s=args.pid_period_s,
             feature_scale=feature_scale,
         )
         next_temp, pred_delta, pred_window = predict_next(
-            model=model, checkpoint=checkpoint, feature_window=feature_window,
-            feature_names=feature_names, device=device, temp=current_temp,
-            previous_temp=previous_temp, temp_ref=target_temp, dt_s=dt_s,
-            terms=terms, kp=kp, ki=ki, kd=kd,
+            model=model,
+            checkpoint=checkpoint,
+            feature_window=feature_window,
+            feature_names=feature_names,
+            device=device,
+            temp=current_temp,
+            previous_temp=previous_temp,
+            temp_ref=target_temp,
+            dt_s=dt_s,
+            terms=terms,
+            kp=kp,
+            ki=ki,
+            kd=kd,
         )
 
         if not np.isfinite(next_temp) or abs(next_temp) > float(args.max_abs_temp):
             valid = False
             invalid_reason = f"temperature became invalid at step {step}: {next_temp}"
             # Keep a finite placeholder so metrics don't crash.
-            next_temp = float(np.nan_to_num(next_temp, nan=args.max_abs_temp,
-                              posinf=args.max_abs_temp, neginf=-args.max_abs_temp))
+            next_temp = float(
+                np.nan_to_num(
+                    next_temp,
+                    nan=args.max_abs_temp,
+                    posinf=args.max_abs_temp,
+                    neginf=-args.max_abs_temp,
+                )
+            )
 
         temps.append(float(next_temp))
         times.append(float((step + 1) * dt_s))
 
         if save_trajectory:
-            rows.append({
-                "candidate_id": candidate_id,
-                "step": step + 1,
-                "elapsed_s": (step + 1) * dt_s,
-                "temp": next_temp,
-                "temp_ref": target_temp,
-                "error": target_temp - next_temp,
-                "kp": kp,
-                "ki": ki,
-                "kd": kd,
-                "u": terms["u"],
-                "u_p": terms["u_p"],
-                "u_i": terms["u_i"],
-                "u_d": terms["u_d"],
-                "diff_out": terms["diff_out"],
-                "pred_delta": pred_delta,
-            })
+            rows.append(
+                {
+                    "candidate_id": candidate_id,
+                    "step": step + 1,
+                    "elapsed_s": (step + 1) * dt_s,
+                    "temp": next_temp,
+                    "temp_ref": target_temp,
+                    "error": target_temp - next_temp,
+                    "kp": kp,
+                    "ki": ki,
+                    "kd": kd,
+                    "u": terms["u"],
+                    "u_p": terms["u_p"],
+                    "u_i": terms["u_i"],
+                    "u_d": terms["u_d"],
+                    "diff_out": terms["diff_out"],
+                    "pred_delta": pred_delta,
+                }
+            )
 
         next_feature = make_feature_row(
             feature_names,
@@ -531,7 +586,7 @@ def compute_metrics(
     valid: bool,
     invalid_reason: str,
     args: Any,
-) -> Dict[str, float]:
+) -> Metrics:
     error = target_temp - temps
     abs_error = np.abs(error)
 
@@ -553,8 +608,12 @@ def compute_metrics(
 
     near_idx = np.where(abs_error <= float(args.near_band))[0]
     settle_idx = np.where(abs_error <= float(args.settle_band))[0]
-    time_to_near = float(times[int(near_idx[0])]) if len(near_idx) else float(args.duration_s) + 999.0
-    time_to_settle = float(times[int(settle_idx[0])]) if len(settle_idx) else float(args.duration_s) + 999.0
+    time_to_near = (
+        float(times[int(near_idx[0])]) if len(near_idx) else float(args.duration_s) + 999.0
+    )
+    time_to_settle = (
+        float(times[int(settle_idx[0])]) if len(settle_idx) else float(args.duration_s) + 999.0
+    )
 
     tail_mae = float(np.mean(tail_abs_error))
     tail_bias = float(np.mean(tail_error))

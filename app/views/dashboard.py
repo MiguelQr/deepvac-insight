@@ -1,9 +1,13 @@
 """DashboardMixin — builds and refreshes the Dashboard page."""
-import pyqtgraph as pg
 
-from PySide6.QtCore import Qt
+import pyqtgraph as pg
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.common import fmt
@@ -50,8 +54,8 @@ class DashboardMixin:
         charts_row = QHBoxLayout()
         charts_row.setSpacing(12)
         card1, self._dash_cost_plot = self._dash_chart_card(self.tr("COST OVER RUNS"))
-        card2, self._dash_mae_plot  = self._dash_chart_card(self.tr("TAIL MAE DISTRIBUTION"))
-        card3, self._dash_ovr_plot  = self._dash_chart_card(self.tr("OVERSHOOT vs COST"))
+        card2, self._dash_mae_plot = self._dash_chart_card(self.tr("TAIL MAE DISTRIBUTION"))
+        card3, self._dash_ovr_plot = self._dash_chart_card(self.tr("OVERSHOOT vs COST"))
         for c in [card1, card2, card3]:
             charts_row.addWidget(c, 1)
         self._dash_body.addLayout(charts_row)
@@ -69,16 +73,16 @@ class DashboardMixin:
         if not self.runs:
             return
 
-        maes  = [r["tail_mae"] for r in self.runs if r.get("tail_mae") is not None]
-        best  = min(self.runs, key=lambda r: (r.get("tail_mae") or float("inf")))
+        maes = [r["tail_mae"] for r in self.runs if r.get("tail_mae") is not None]
+        best = min(self.runs, key=lambda r: r.get("tail_mae") or float("inf"))
 
         for lbl, val in [
-            (self.tr("Total Runs"),        str(len(self.runs))),
-            (self.tr("Avg Tail MAE"),      fmt(sum(maes) / len(maes)) if maes else "-"),
-            (self.tr("Best Run"),          best["id"]),
-            (self.tr("Best MAE"),          fmt(best.get("mae"))),
-            (self.tr("Best Tail MAE"),     fmt(best.get("tail_mae"))),
-            (self.tr("Best Overshoot"),    fmt(best.get("overshoot"))),
+            (self.tr("Total Runs"), str(len(self.runs))),
+            (self.tr("Avg Tail MAE"), fmt(sum(maes) / len(maes)) if maes else "-"),
+            (self.tr("Best Run"), best["id"]),
+            (self.tr("Best MAE"), fmt(best.get("mae"))),
+            (self.tr("Best Tail MAE"), fmt(best.get("tail_mae"))),
+            (self.tr("Best Overshoot"), fmt(best.get("overshoot"))),
         ]:
             box = QFrame()
             box.setObjectName("card")
@@ -98,6 +102,7 @@ class DashboardMixin:
 
     def _draw_dashboard_charts(self):
         import numpy as np
+
         self._dash_cost_plot.clear()
         self._dash_mae_plot.clear()
         self._dash_ovr_plot.clear()
@@ -105,35 +110,50 @@ class DashboardMixin:
             return
 
         ordered = list(reversed(self.runs))
-        xs    = list(range(len(ordered)))
-        costs = [(x, r["cost"]) for x, r in zip(xs, ordered) if r.get("cost") is not None]
+        xs = list(range(len(ordered)))
+        costs = [
+            (x, r["cost"]) for x, r in zip(xs, ordered, strict=False) if r.get("cost") is not None
+        ]
         if costs:
-            vx, vy = zip(*costs)
-            self._dash_cost_plot.plot(list(vx), list(vy),
-                                      pen=pg.mkPen("#60a5fa", width=1.8),
-                                      symbol="o", symbolSize=5,
-                                      symbolBrush="#60a5fa", symbolPen=None)
+            vx, vy = zip(*costs, strict=False)
+            self._dash_cost_plot.plot(
+                list(vx),
+                list(vy),
+                pen=pg.mkPen("#60a5fa", width=1.8),
+                symbol="o",
+                symbolSize=5,
+                symbolBrush="#60a5fa",
+                symbolPen=None,
+            )
         self._dash_cost_plot.setLabel("bottom", self.tr("Run (oldest → newest)"))
-        self._dash_cost_plot.setLabel("left",   self.tr("Cost"))
+        self._dash_cost_plot.setLabel("left", self.tr("Cost"))
 
         maes = [r["tail_mae"] for r in self.runs if r.get("tail_mae") is not None]
         if maes:
             bins = min(25, max(5, len(maes) // 4))
             y, x = np.histogram(maes, bins=bins)
-            w    = (x[1] - x[0]) * 0.85 if len(x) > 1 else 1.0
-            bar  = pg.BarGraphItem(x=x[:-1], height=y, width=w,
-                                   brush="#51d6c7", pen=pg.mkPen("#111827", width=0.5))
+            w = (x[1] - x[0]) * 0.85 if len(x) > 1 else 1.0
+            bar = pg.BarGraphItem(
+                x=x[:-1], height=y, width=w, brush="#51d6c7", pen=pg.mkPen("#111827", width=0.5)
+            )
             self._dash_mae_plot.addItem(bar)
         self._dash_mae_plot.setLabel("bottom", self.tr("Tail MAE"))
-        self._dash_mae_plot.setLabel("left",   self.tr("Count"))
+        self._dash_mae_plot.setLabel("left", self.tr("Count"))
 
-        pairs = [(r["cost"], r["overshoot"]) for r in self.runs
-                 if r.get("cost") is not None and r.get("overshoot") is not None]
+        pairs = [
+            (r["cost"], r["overshoot"])
+            for r in self.runs
+            if r.get("cost") is not None and r.get("overshoot") is not None
+        ]
         if pairs:
-            cx, cy  = zip(*pairs)
-            scatter = pg.ScatterPlotItem(list(cx), list(cy), size=7,
-                                         brush=pg.mkBrush("#f2bd52"),
-                                         pen=pg.mkPen("#111827", width=0.5))
+            cx, cy = zip(*pairs, strict=False)
+            scatter = pg.ScatterPlotItem(
+                list(cx),
+                list(cy),
+                size=7,
+                brush=pg.mkBrush("#f2bd52"),
+                pen=pg.mkPen("#111827", width=0.5),
+            )
             self._dash_ovr_plot.addItem(scatter)
         self._dash_ovr_plot.setLabel("bottom", self.tr("Cost"))
-        self._dash_ovr_plot.setLabel("left",   self.tr("Overshoot"))
+        self._dash_ovr_plot.setLabel("left", self.tr("Overshoot"))

@@ -3,6 +3,7 @@ local SQLite database. Each row is linked to the run it was made on (by
 run key) and the user who made it (id + a denormalized name snapshot for
 display, so authorship still reads correctly even if that user later
 renames themselves)."""
+
 import sqlite3
 from datetime import datetime, timezone
 
@@ -105,8 +106,16 @@ def add_annotation(run_key, user_id, user_name, x0, x1, label, color):
             INSERT INTO annotations (run_key, user_id, user_name, x0, x1, label, color, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_key, user_id, user_name or "Unknown", float(x0), float(x1),
-             str(label), str(color), _now()),
+            (
+                run_key,
+                user_id,
+                user_name or "Unknown",
+                float(x0),
+                float(x1),
+                str(label),
+                str(color),
+                _now(),
+            ),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM annotations WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -143,10 +152,17 @@ def add_rule(run_key, user_id, user_name, name, channel, lo, hi, color):
             INSERT INTO variable_rules (run_key, user_id, user_name, name, channel, lo, hi, color, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_key, user_id, user_name or "Unknown", str(name), str(channel),
-             float(lo) if lo is not None else None,
-             float(hi) if hi is not None else None,
-             str(color), _now()),
+            (
+                run_key,
+                user_id,
+                user_name or "Unknown",
+                str(name),
+                str(channel),
+                float(lo) if lo is not None else None,
+                float(hi) if hi is not None else None,
+                str(color),
+                _now(),
+            ),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM variable_rules WHERE id = ?", (cur.lastrowid,)).fetchone()

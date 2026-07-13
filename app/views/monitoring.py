@@ -1,10 +1,21 @@
 """MonitoringMixin — builds the Live Monitoring page and alarm management."""
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.common import fmt
@@ -68,18 +79,23 @@ class MonitoringMixin:
         self._mon_interval = QComboBox()
         self._mon_interval.addItems(["250 ms", "500 ms", "1 s", "2 s", "5 s"])
         self._mon_interval.setCurrentIndex(2)
-        self._mon_interval.setToolTip(self.tr(
-            "The connection is push-based (the chamber sends samples as they "
-            "occur) — this is reserved for future poll-based protocols."))
+        self._mon_interval.setToolTip(
+            self.tr(
+                "The connection is push-based (the chamber sends samples as they "
+                "occur) — this is reserved for future poll-based protocols."
+            )
+        )
 
-        for row_idx, (cap, w) in enumerate([
-            (self.tr("Protocol"),      self._mon_protocol),
-            (self.tr("Host / Port"),   host_row),
-            (self.tr("Poll interval"), self._mon_interval),
-        ]):
-            l = QLabel(cap)
-            l.setObjectName("sectionLabel")
-            conn_grid.addWidget(l, row_idx, 0)
+        for row_idx, (cap, w) in enumerate(
+            [
+                (self.tr("Protocol"), self._mon_protocol),
+                (self.tr("Host / Port"), host_row),
+                (self.tr("Poll interval"), self._mon_interval),
+            ]
+        ):
+            lbl = QLabel(cap)
+            lbl.setObjectName("sectionLabel")
+            conn_grid.addWidget(lbl, row_idx, 0)
             conn_grid.addWidget(w, row_idx, 1)
         cl.addLayout(conn_grid)
 
@@ -89,7 +105,7 @@ class MonitoringMixin:
         cl.addWidget(self._mon_connect_btn)
 
         status_row = QHBoxLayout()
-        self._mon_dot       = QLabel("●")
+        self._mon_dot = QLabel("●")
         self._mon_dot.setObjectName("chamberIconOff")
         self._mon_status_lbl = QLabel(self.tr("Offline — not connected"))
         self._mon_status_lbl.setObjectName("statusText")
@@ -155,53 +171,60 @@ class MonitoringMixin:
         afl.setContentsMargins(8, 8, 8, 8)
         afl.setSpacing(8)
 
-        self._alarm_name_ed   = QLineEdit()
+        self._alarm_name_ed = QLineEdit()
         self._alarm_name_ed.setPlaceholderText(self.tr("Alarm name"))
         self._alarm_name_ed.setFixedWidth(130)
         self._alarm_var_combo = QComboBox()
         self._alarm_var_combo.addItems(
-            ["temp", "temp_ref", "kp", "ki", "kd", "temp_u", "temp_u_p", "temp_u_i", "temp_u_d"])
+            ["temp", "temp_ref", "kp", "ki", "kd", "temp_u", "temp_u_p", "temp_u_i", "temp_u_d"]
+        )
         self._alarm_var_combo.setEditable(True)
         self._alarm_var_combo.setFixedWidth(100)
         self._alarm_cond_combo = QComboBox()
-        cond_labels = {"above": self.tr("above"), "below": self.tr("below"),
-                       "outside range": self.tr("outside range")}
+        cond_labels = {
+            "above": self.tr("above"),
+            "below": self.tr("below"),
+            "outside range": self.tr("outside range"),
+        }
         for cond in _CONDITIONS:
             self._alarm_cond_combo.addItem(cond_labels[cond], cond)
         self._alarm_cond_combo.setFixedWidth(110)
-        self._alarm_val_ed  = QLineEdit()
+        self._alarm_val_ed = QLineEdit()
         self._alarm_val_ed.setPlaceholderText(self.tr("threshold"))
         self._alarm_val_ed.setFixedWidth(80)
         self._alarm_val2_ed = QLineEdit()
         self._alarm_val2_ed.setPlaceholderText(self.tr("upper (range)"))
         self._alarm_val2_ed.setFixedWidth(100)
         self._alarm_sev_combo = QComboBox()
-        sev_labels = {"Info": self.tr("Info"), "Warning": self.tr("Warning"),
-                      "Critical": self.tr("Critical")}
+        sev_labels = {
+            "Info": self.tr("Info"),
+            "Warning": self.tr("Warning"),
+            "Critical": self.tr("Critical"),
+        }
         for sev in _SEVERITIES:
             self._alarm_sev_combo.addItem(sev_labels[sev], sev)
         self._alarm_sev_combo.setFixedWidth(90)
 
-        save_alarm_btn   = QPushButton(self.tr("Add"))
+        save_alarm_btn = QPushButton(self.tr("Add"))
         save_alarm_btn.setObjectName("primaryButton")
         save_alarm_btn.clicked.connect(self._save_alarm)
         cancel_alarm_btn = QPushButton(self.tr("Cancel"))
         cancel_alarm_btn.clicked.connect(self._toggle_alarm_form)
 
         for cap, w in [
-            (self.tr("Name"),      self._alarm_name_ed),
-            (self.tr("Variable"),  self._alarm_var_combo),
+            (self.tr("Name"), self._alarm_name_ed),
+            (self.tr("Variable"), self._alarm_var_combo),
             (self.tr("Condition"), self._alarm_cond_combo),
-            (self.tr("Value"),     self._alarm_val_ed),
-            ("",                   self._alarm_val2_ed),
-            (self.tr("Severity"),  self._alarm_sev_combo),
-            ("",                   save_alarm_btn),
-            ("",                   cancel_alarm_btn),
+            (self.tr("Value"), self._alarm_val_ed),
+            ("", self._alarm_val2_ed),
+            (self.tr("Severity"), self._alarm_sev_combo),
+            ("", save_alarm_btn),
+            ("", cancel_alarm_btn),
         ]:
             if cap:
-                l = QLabel(cap)
-                l.setObjectName("sectionLabel")
-                afl.addWidget(l)
+                lbl = QLabel(cap)
+                lbl.setObjectName("sectionLabel")
+                afl.addWidget(lbl)
             afl.addWidget(w)
         afl.addStretch(1)
         self._alarm_form.setVisible(False)
@@ -237,7 +260,8 @@ class MonitoringMixin:
         if connected:
             host = self._mon_host.text().strip() or "127.0.0.1"
             self._mon_status_lbl.setText(
-                self.tr("Online — {0}:{1}").format(host, self._mon_port.value()))
+                self.tr("Online — {0}:{1}").format(host, self._mon_port.value())
+            )
         else:
             self._mon_status_lbl.setText(self.tr("Offline — not connected"))
             self._mon_live_table.setRowCount(0)
@@ -253,6 +277,7 @@ class MonitoringMixin:
 
     def _mon_on_sample(self, sample):
         from datetime import datetime, timezone
+
         self._mon_update_lbl.setText(datetime.now(timezone.utc).strftime("%H:%M:%S UTC"))
         self._render_live_sample(sample)
         self._evaluate_alarms(sample)
@@ -275,24 +300,30 @@ class MonitoringMixin:
         self._alarm_form.setVisible(not self._alarm_form.isVisible())
 
     def _save_alarm(self):
-        name      = self._alarm_name_ed.text().strip()
-        var       = self._alarm_var_combo.currentText().strip()
-        cond      = self._alarm_cond_combo.currentData()
-        val_text  = self._alarm_val_ed.text().strip()
+        name = self._alarm_name_ed.text().strip()
+        var = self._alarm_var_combo.currentText().strip()
+        cond = self._alarm_cond_combo.currentData()
+        val_text = self._alarm_val_ed.text().strip()
         val2_text = self._alarm_val2_ed.text().strip()
-        sev       = self._alarm_sev_combo.currentData()
+        sev = self._alarm_sev_combo.currentData()
         if not name or not var or not val_text:
             return
         try:
-            value  = float(val_text)
+            value = float(val_text)
             value2 = float(val2_text) if val2_text else None
         except ValueError:
             return
-        self._monitor_alarms.append({
-            "name": name, "variable": var, "condition": cond,
-            "value": value, "value2": value2, "severity": sev,
-            "_active": False,
-        })
+        self._monitor_alarms.append(
+            {
+                "name": name,
+                "variable": var,
+                "condition": cond,
+                "value": value,
+                "value2": value2,
+                "severity": sev,
+                "_active": False,
+            }
+        )
         self._alarm_name_ed.clear()
         self._alarm_val_ed.clear()
         self._alarm_val2_ed.clear()
@@ -326,13 +357,25 @@ class MonitoringMixin:
             self._refresh_alarms_table()
 
     def _refresh_alarms_table(self):
-        cols = [self.tr("Name"), self.tr("Variable"), self.tr("Condition"),
-                self.tr("Value / Range"), self.tr("Severity"), self.tr("Status")]
-        cond_labels = {"above": self.tr("above"), "below": self.tr("below"),
-                       "outside range": self.tr("outside range")}
-        sev_labels = {"Info": self.tr("Info"), "Warning": self.tr("Warning"),
-                      "Critical": self.tr("Critical")}
-        tbl  = self._alarms_table
+        cols = [
+            self.tr("Name"),
+            self.tr("Variable"),
+            self.tr("Condition"),
+            self.tr("Value / Range"),
+            self.tr("Severity"),
+            self.tr("Status"),
+        ]
+        cond_labels = {
+            "above": self.tr("above"),
+            "below": self.tr("below"),
+            "outside range": self.tr("outside range"),
+        }
+        sev_labels = {
+            "Info": self.tr("Info"),
+            "Warning": self.tr("Warning"),
+            "Critical": self.tr("Critical"),
+        }
+        tbl = self._alarms_table
         tbl.setUpdatesEnabled(False)
         tbl.setAlternatingRowColors(True)
         tbl.setShowGrid(False)
@@ -354,14 +397,21 @@ class MonitoringMixin:
                 is_active, status_display = True, self.tr("Active")
             else:
                 is_active, status_display = False, self.tr("Inactive")
-            values = [alarm["name"], alarm["variable"], cond_labels.get(alarm["condition"], alarm["condition"]),
-                      val_str, sev_labels.get(sev, sev), status_display]
+            values = [
+                alarm["name"],
+                alarm["variable"],
+                cond_labels.get(alarm["condition"], alarm["condition"]),
+                val_str,
+                sev_labels.get(sev, sev),
+                status_display,
+            ]
             for ci, v in enumerate(values):
                 item = QTableWidgetItem(str(v))
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 if ci == 4:
-                    color = {"Info": "#60a5fa", "Warning": "#f2bd52",
-                             "Critical": "#ff6f7d"}.get(sev, "#94a3b8")
+                    color = {"Info": "#60a5fa", "Warning": "#f2bd52", "Critical": "#ff6f7d"}.get(
+                        sev, "#94a3b8"
+                    )
                     item.setForeground(QColor(color))
                 elif ci == 5 and is_active:
                     item.setForeground(QColor("#ff6f7d"))

@@ -1,4 +1,5 @@
 """Custom frameless window title bar with status pills and window controls."""
+
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
@@ -43,7 +44,8 @@ class TitleBar(QWidget):
         lay.addStretch(1)
 
         self.status_chamber = self._status_pill(
-            "broadcast", self.tr("Chamber Offline"), "#ef4444", "statusText")
+            "broadcast", self.tr("Chamber Offline"), "#ef4444", "statusText"
+        )
         lay.addWidget(self.status_chamber)
         lay.addSpacing(4)
 
@@ -57,8 +59,8 @@ class TitleBar(QWidget):
         lay.addWidget(self.btn_bell)
         lay.addSpacing(4)
 
-        self.btn_min   = QPushButton()
-        self.btn_max   = QPushButton()
+        self.btn_min = QPushButton()
+        self.btn_max = QPushButton()
         self.btn_close = QPushButton()
         self.btn_min.setObjectName("winBtn")
         self.btn_max.setObjectName("winBtn")
@@ -68,9 +70,9 @@ class TitleBar(QWidget):
             btn.setFocusPolicy(Qt.NoFocus)
             btn.setIconSize(QSize(14, 14))
             lay.addWidget(btn)
-        self.btn_min.setIcon(_svg_icon("dash-lg",  "#94a3b8", 14))
-        self.btn_max.setIcon(_svg_icon("square",   "#94a3b8", 14))
-        self.btn_close.setIcon(_svg_icon("x-lg",   "#94a3b8", 14))
+        self.btn_min.setIcon(_svg_icon("dash-lg", "#94a3b8", 14))
+        self.btn_max.setIcon(_svg_icon("square", "#94a3b8", 14))
+        self.btn_close.setIcon(_svg_icon("x-lg", "#94a3b8", 14))
 
         self.btn_min.clicked.connect(main_window.showMinimized)
         self.btn_max.clicked.connect(self._toggle_max)
@@ -92,25 +94,27 @@ class TitleBar(QWidget):
         pl.addWidget(icon)
         pl.addWidget(txt)
         pill._icon = icon
-        pill._txt  = txt
+        pill._txt = txt
         return pill
 
     def set_chamber_status(self, online):
         color = "#22c55e" if online else "#ef4444"
         self.status_chamber._icon.setPixmap(_render_svg("broadcast", color, 14))
         self.status_chamber._txt.setText(
-            self.tr("Chamber Online") if online else self.tr("Chamber Offline"))
+            self.tr("Chamber Online") if online else self.tr("Chamber Offline")
+        )
 
     def set_bell_active(self, active):
         color = "#60a5fa" if active else "#94a3b8"
         self.btn_bell.setIcon(_svg_icon("bell", color, 16))
         self.btn_bell.setToolTip(
-            self.tr("Notifications — chamber connected") if active else self.tr("Notifications"))
+            self.tr("Notifications — chamber connected") if active else self.tr("Notifications")
+        )
 
     def _toggle_max(self):
         if self._win.isMaximized():
             self._win.showNormal()
-            self.btn_max.setIcon(_svg_icon("square",       "#94a3b8", 14))
+            self.btn_max.setIcon(_svg_icon("square", "#94a3b8", 14))
         else:
             self._win.showMaximized()
             self.btn_max.setIcon(_svg_icon("window-stack", "#94a3b8", 14))

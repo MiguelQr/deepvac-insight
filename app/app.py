@@ -1,22 +1,22 @@
 """Entry point — login flow, splash screen, and main() only."""
+
 import sys
 
-from PySide6.QtCore import Qt, QRectF, QSettings, QCoreApplication
+from PySide6.QtCore import QCoreApplication, QRectF, QSettings, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
-from app.common import LOGO_PATH, ICON_PATH
-from app.main_window import DeepVacDesktop
+from app.common import ICON_PATH, LOGO_PATH
 from app.login_window import LoginWindow
-from app.services import auth_service, backup_service, log_service, i18n_service, settings_service
+from app.main_window import DeepVacDesktop
+from app.services import auth_service, backup_service, i18n_service, log_service, settings_service
 
 
 class LoadingSplash(QSplashScreen):
     def drawContents(self, painter):
         painter.setPen(QColor("#f8fafc"))
         painter.setFont(QFont("Segoe UI", 11, 600))
-        painter.drawText(QRectF(0, 224, 520, 54),
-                         Qt.AlignCenter | Qt.TextWordWrap, self.message())
+        painter.drawText(QRectF(0, 224, 520, 54), Qt.AlignCenter | Qt.TextWordWrap, self.message())
 
 
 def make_splash():
@@ -79,7 +79,9 @@ def main():
         splash.show()
         splash.showMessage(
             QCoreApplication.translate("main", "Starting DeepVac…"),
-            Qt.AlignCenter | Qt.AlignBottom, Qt.white)
+            Qt.AlignCenter | Qt.AlignBottom,
+            Qt.white,
+        )
         app.processEvents()
 
         window = DeepVacDesktop(splash=splash, current_user=user)

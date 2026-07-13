@@ -1,19 +1,29 @@
 """RunsMixin — builds the Runs browser page and manages run opening/comparison."""
+
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMenu, QPushButton, QTableWidget, QVBoxLayout, QWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.common import fmt, _svg_icon
-from app.run_tab import RunTabPage
 import app.services.data_service as data
 import app.services.settings_service as settings_service
+from app.common import _svg_icon, fmt
+from app.run_tab import RunTabPage
 
 
 class UploadWorker(QThread):
     finished_ok = Signal(dict)
-    failed      = Signal(str)
+    failed = Signal(str)
 
     def __init__(self, paths):
         super().__init__()
@@ -62,8 +72,7 @@ class RunsMixin:
         self.search_box = QLineEdit()
         self.search_box.setObjectName("searchBox")
         self.search_box.setPlaceholderText(self.tr("Search run id…"))
-        self.search_box.addAction(
-            _svg_icon("search", "#64748b", 13), QLineEdit.LeadingPosition)
+        self.search_box.addAction(_svg_icon("search", "#64748b", 13), QLineEdit.LeadingPosition)
         self.search_box.textChanged.connect(self.render_runs)
         left_lay.addWidget(self.search_box)
 
@@ -123,7 +132,7 @@ class RunsMixin:
             self._open_run(active)
 
     def render_runs(self):
-        query       = self.search_box.text().lower().strip()
+        query = self.search_box.text().lower().strip()
         active_page = self.editor_area.active_page()
         compare_keys = active_page.compare_runs if active_page else set()
         self.run_list.blockSignals(True)
@@ -135,8 +144,7 @@ class RunsMixin:
             item = QListWidgetItem(run["id"])
             item.setData(Qt.UserRole, run["key"])
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.Checked if run["key"] in compare_keys else Qt.Unchecked)
+            item.setCheckState(Qt.Checked if run["key"] in compare_keys else Qt.Unchecked)
             self.run_list.addItem(item)
         self.run_list.blockSignals(False)
 
@@ -148,9 +156,9 @@ class RunsMixin:
         item = self.run_list.itemAt(pos)
         if not item:
             return
-        key  = item.data(Qt.UserRole)
+        key = item.data(Qt.UserRole)
         menu = QMenu(self)
-        act_open   = menu.addAction(self.tr("Open in Analysis"))
+        act_open = menu.addAction(self.tr("Open in Analysis"))
         act_rename = menu.addAction(self.tr("Rename…"))
         chosen = menu.exec(self.run_list.viewport().mapToGlobal(pos))
         if chosen == act_open:
@@ -166,7 +174,8 @@ class RunsMixin:
         if not run:
             return
         new_name, ok = QInputDialog.getText(
-            self, self.tr("Rename run"), self.tr("Name:"), text=run["id"])
+            self, self.tr("Rename run"), self.tr("Name:"), text=run["id"]
+        )
         if not ok:
             return
         new_name = new_name.strip()
@@ -191,9 +200,8 @@ class RunsMixin:
     def _show_upload_menu(self):
         menu = QMenu(self)
         act_folders = menu.addAction(self.tr("Upload Folder(s)…"))
-        act_files   = menu.addAction(self.tr("Upload File(s)…"))
-        chosen = menu.exec(
-            self.upload_btn.mapToGlobal(self.upload_btn.rect().bottomLeft()))
+        act_files = menu.addAction(self.tr("Upload File(s)…"))
+        chosen = menu.exec(self.upload_btn.mapToGlobal(self.upload_btn.rect().bottomLeft()))
         if chosen == act_folders:
             self._upload_folders()
         elif chosen == act_files:
@@ -201,8 +209,12 @@ class RunsMixin:
 
     def _pick_multiple_dirs(self, title):
         from PySide6.QtWidgets import (
-            QAbstractItemView, QFileDialog, QListView, QTreeView,
+            QAbstractItemView,
+            QFileDialog,
+            QListView,
+            QTreeView,
         )
+
         dialog = QFileDialog(self, title)
         dialog.setFileMode(QFileDialog.Directory)
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
@@ -215,15 +227,22 @@ class RunsMixin:
 
     def _upload_folders(self):
         dirs = self._pick_multiple_dirs(
-            self.tr("Select run folder(s) to upload (a folder may hold one run or many run subfolders)"))
+            self.tr(
+                "Select run folder(s) to upload (a folder may hold one run or many run subfolders)"
+            )
+        )
         if dirs:
             self._start_upload(dirs)
 
     def _upload_files(self):
         from PySide6.QtWidgets import QFileDialog
+
         files, _ = QFileDialog.getOpenFileNames(
-            self, self.tr("Select run_samples.csv file(s)"), "",
-            self.tr("Run samples (run_samples.csv);;CSV files (*.csv);;All files (*)"))
+            self,
+            self.tr("Select run_samples.csv file(s)"),
+            "",
+            self.tr("Run samples (run_samples.csv);;CSV files (*.csv);;All files (*)"),
+        )
         if files:
             self._start_upload(files)
 
@@ -238,6 +257,7 @@ class RunsMixin:
     def _upload_done(self, result):
         from PySide6.QtCore import QCoreApplication
         from PySide6.QtWidgets import QMessageBox
+
         self.upload_btn.setEnabled(True)
         self.upload_btn.setToolTip(self.tr("Upload run(s) into the database"))
         self.runs = result["runs"]
@@ -250,12 +270,14 @@ class RunsMixin:
         # RunsMixin one) -- call QCoreApplication.translate() directly with
         # the exact context pyside6-lupdate recorded for this string.
         QMessageBox.information(
-            self, self.tr("Upload complete"),
-            QCoreApplication.translate(
-                "RunsMixin", "Imported %n run(s) into the database.", "", n))
+            self,
+            self.tr("Upload complete"),
+            QCoreApplication.translate("RunsMixin", "Imported %n run(s) into the database.", "", n),
+        )
 
     def _upload_failed(self, msg):
         from PySide6.QtWidgets import QMessageBox
+
         self.upload_btn.setEnabled(True)
         self.upload_btn.setToolTip(self.tr("Upload run(s) into the database"))
         QMessageBox.critical(self, self.tr("Upload failed"), msg)
@@ -276,9 +298,9 @@ class RunsMixin:
         page.load()
 
     def _run_checked(self, item):
-        key     = item.data(Qt.UserRole)
+        key = item.data(Qt.UserRole)
         checked = item.checkState() == Qt.Checked
-        page    = self.editor_area.active_page()
+        page = self.editor_area.active_page()
         if page:
             page.set_compare_run(key, checked)
 
@@ -296,12 +318,14 @@ class RunsMixin:
         try:
             table = data.run_table(key)
             self._fill_generic_table(
-                self._raw_run_table, table["columns"], table["rows"], max_rows=2000)
+                self._raw_run_table, table["columns"], table["rows"], max_rows=2000
+            )
         except Exception:
             pass
 
     def _fill_generic_table(self, table, columns, rows, max_rows=None):
         from PySide6.QtWidgets import QTableWidgetItem
+
         shown = rows[:max_rows] if max_rows else rows
         table.setUpdatesEnabled(False)
         table.setAlternatingRowColors(True)

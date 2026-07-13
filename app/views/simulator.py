@@ -1,15 +1,24 @@
 """SimulatorMixin — builds the GRU Simulator page and handles animation."""
+
 import numpy as np
 import pyqtgraph as pg
-
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.common import COLORS, fmt
 from app.chart_widget import ChartWidget
+from app.common import COLORS, fmt
 from app.run_tab import SimWorker
 
 
@@ -21,7 +30,7 @@ class SimulatorMixin:
         page.setFrameShape(QFrame.NoFrame)
         body = QWidget()
         body.setObjectName("workspaceBody")
-        lay  = QVBoxLayout(body)
+        lay = QVBoxLayout(body)
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(12)
         page.setWidget(body)
@@ -40,21 +49,32 @@ class SimulatorMixin:
         form_grid.setVerticalSpacing(10)
         self.sim_inputs = {}
         defaults = {
-            "kp": "7", "ki": "700", "kd": "10",
-            "start_temp": "27", "target_temp": "0",
-            "duration_s": "1200", "dt_s": "2",
-            "initial_p": "0", "initial_i": "0", "initial_d": "0",
+            "kp": "7",
+            "ki": "700",
+            "kd": "10",
+            "start_temp": "27",
+            "target_temp": "0",
+            "duration_s": "1200",
+            "dt_s": "2",
+            "initial_p": "0",
+            "initial_i": "0",
+            "initial_d": "0",
         }
         field_labels = {
-            "kp": self.tr("Kp"), "ki": self.tr("Ki"), "kd": self.tr("Kd"),
-            "start_temp": self.tr("Start Temp"), "target_temp": self.tr("Target Temp"),
-            "duration_s": self.tr("Duration S"), "dt_s": self.tr("Dt S"),
-            "initial_p": self.tr("Initial P"), "initial_i": self.tr("Initial I"),
+            "kp": self.tr("Kp"),
+            "ki": self.tr("Ki"),
+            "kd": self.tr("Kd"),
+            "start_temp": self.tr("Start Temp"),
+            "target_temp": self.tr("Target Temp"),
+            "duration_s": self.tr("Duration S"),
+            "dt_s": self.tr("Dt S"),
+            "initial_p": self.tr("Initial P"),
+            "initial_i": self.tr("Initial I"),
             "initial_d": self.tr("Initial D"),
         }
         for i, (key, val) in enumerate(defaults.items()):
             cell = QWidget()
-            cl   = QVBoxLayout(cell)
+            cl = QVBoxLayout(cell)
             cl.setContentsMargins(0, 0, 0, 0)
             cl.setSpacing(4)
             lbl = QLabel(field_labels.get(key, key.replace("_", " ").title()))
@@ -78,11 +98,11 @@ class SimulatorMixin:
 
         sim_card = QFrame()
         sim_card.setObjectName("card")
-        sim_lay  = QVBoxLayout(sim_card)
+        sim_lay = QVBoxLayout(sim_card)
         sim_lay.setContentsMargins(12, 12, 12, 12)
         sim_lay.setSpacing(8)
         sim_tb = QHBoxLayout()
-        self.sim_title   = QLabel(self.tr("Awaiting simulation"))
+        self.sim_title = QLabel(self.tr("Awaiting simulation"))
         self.sim_title.setObjectName("title")
         self.sim_channel = QComboBox()
         self.sim_channel.addItems(["temp", "error", "u", "pred_delta"])
@@ -115,7 +135,9 @@ class SimulatorMixin:
         self.sim_button.setEnabled(True)
         self.sim_title.setText(
             self.tr("Kp {0:g} / Ki {1:g} / Kd {2:g}").format(
-                payload['kp'], payload['ki'], payload['kd']))
+                payload["kp"], payload["ki"], payload["kd"]
+            )
+        )
         self._render_sim_summary()
         self._start_sim_animation()
 
@@ -128,11 +150,11 @@ class SimulatorMixin:
         self._clear_layout(self.sim_summary_grid)
         metrics = self.sim_series.get("metrics", {}) if self.sim_series else {}
         stats = [
-            (self.tr("Cost"),      metrics.get("cost")),
-            (self.tr("Tail MAE"),  metrics.get("tail_mae")),
-            (self.tr("End Temp"),  metrics.get("end_temp")),
+            (self.tr("Cost"), metrics.get("cost")),
+            (self.tr("Tail MAE"), metrics.get("tail_mae")),
+            (self.tr("End Temp"), metrics.get("end_temp")),
             (self.tr("Overshoot"), metrics.get("overshoot_max")),
-            (self.tr("Settle s"),  metrics.get("time_to_settle_s")),
+            (self.tr("Settle s"), metrics.get("time_to_settle_s")),
         ]
         for i, (lbl, val) in enumerate(stats):
             box = QFrame()
@@ -158,13 +180,13 @@ class SimulatorMixin:
             self._sim_anim_timer.stop()
         if not self.sim_series:
             return
-        ch   = self.sim_channel.currentText()
+        ch = self.sim_channel.currentText()
         cols = ["temp", "temp_ref"] if ch == "temp" else [ch]
         all_points = self.sim_series.get("points", [])
         if not all_points:
             return
         finite_t = [p["t"] for p in all_points if isinstance(p.get("t"), (int, float))]
-        first_t  = finite_t[0] if finite_t else 0
+        first_t = finite_t[0] if finite_t else 0
         self._sim_anim_data = []
         for i, col in enumerate(cols):
             color = COLORS[i % len(COLORS)]
@@ -178,8 +200,7 @@ class SimulatorMixin:
                 xs.append(x)
                 ys.append(float(y))
             self._sim_anim_data.append({"col": col, "color": color, "xs": xs, "ys": ys})
-        self._sim_anim_total = max(
-            (len(d["xs"]) for d in self._sim_anim_data), default=0)
+        self._sim_anim_total = max((len(d["xs"]) for d in self._sim_anim_data), default=0)
         if self._sim_anim_total == 0:
             self.draw_simulation()
             return
@@ -187,12 +208,14 @@ class SimulatorMixin:
         self.sim_chart.clear_plot_items()
         self.sim_chart.plot.setLabel("bottom", self.tr("Time elapsed (s)"))
         self.sim_chart.plot.setLabel(
-            "left", self.tr("Temperature [deg C]") if ch == "temp" else self.tr("Value"))
+            "left", self.tr("Temperature [deg C]") if ch == "temp" else self.tr("Value")
+        )
         self.sim_chart.auto_range_on_draw = True
         self._sim_anim_curves = []
         for d in self._sim_anim_data:
             curve = self.sim_chart.plot.plot(
-                [], [], pen=pg.mkPen(d["color"], width=1.8), name=d["col"])
+                [], [], pen=pg.mkPen(d["color"], width=1.8), name=d["col"]
+            )
             self._sim_anim_curves.append(curve)
         self._sim_anim_timer = QTimer(self)
         self._sim_anim_timer.timeout.connect(self._sim_anim_step)
@@ -201,9 +224,9 @@ class SimulatorMixin:
     def _sim_anim_step(self):
         chunk = max(1, self._sim_anim_total // 60)
         self._sim_anim_idx = min(self._sim_anim_idx + chunk, self._sim_anim_total)
-        for curve, d in zip(self._sim_anim_curves, self._sim_anim_data):
-            xs = np.array(d["xs"][:self._sim_anim_idx], dtype=float)
-            ys = np.array(d["ys"][:self._sim_anim_idx], dtype=float)
+        for curve, d in zip(self._sim_anim_curves, self._sim_anim_data, strict=False):
+            xs = np.array(d["xs"][: self._sim_anim_idx], dtype=float)
+            ys = np.array(d["ys"][: self._sim_anim_idx], dtype=float)
             curve.setData(xs, ys)
         if self.sim_chart.auto_range_on_draw and self._sim_anim_idx > 0:
             self.sim_chart.plot.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
@@ -213,16 +236,19 @@ class SimulatorMixin:
             self.sim_chart.curves = list(self._sim_anim_curves)
             self.sim_chart.hover_points = []
             for d in self._sim_anim_data:
-                for x, y in zip(d["xs"], d["ys"]):
+                for x, y in zip(d["xs"], d["ys"], strict=False):
                     self.sim_chart.hover_points.append(
-                        {"x": x, "y": y, "label": d["col"], "color": d["color"]})
+                        {"x": x, "y": y, "label": d["col"], "color": d["color"]}
+                    )
 
     def draw_simulation(self):
         if not self.sim_series:
             return
         if self._sim_anim_timer and self._sim_anim_timer.isActive():
             self._sim_anim_timer.stop()
-        ch      = self.sim_channel.currentText()
-        payload = {"columns": ["temp", "temp_ref"] if ch == "temp" else [ch],
-                   "points":  self.sim_series["points"]}
+        ch = self.sim_channel.currentText()
+        payload = {
+            "columns": ["temp", "temp_ref"] if ch == "temp" else [ch],
+            "points": self.sim_series["points"],
+        }
         self.sim_chart.draw(payload, "line")

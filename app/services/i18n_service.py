@@ -9,6 +9,7 @@ live retranslation machinery here (no LanguageChange event handling / UI
 rebuild). Switching languages therefore takes effect on the next restart;
 the Settings menu makes that explicit rather than silently doing nothing.
 """
+
 from PySide6.QtCore import QTranslator
 
 from app.common import RESOURCES_DIR

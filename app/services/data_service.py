@@ -7,6 +7,7 @@ from argparse import Namespace
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtCore import QCoreApplication
 
@@ -230,7 +231,9 @@ def cache_record_for(samples_path, key=None, group=None):
 
 def sync_cache(progress=None):
     root = runs_root()
-    sample_files = sorted(root.rglob(SAMPLES_FILE), key=lambda path: path.stat().st_mtime, reverse=True)
+    sample_files = sorted(
+        root.rglob(SAMPLES_FILE), key=lambda path: path.stat().st_mtime, reverse=True
+    )
     conn = connect_cache()
     active_keys = []
     total = len(sample_files)
@@ -391,9 +394,7 @@ def upload_runs(paths, progress=None):
     containing many such run folders, or individual run_samples.csv files."""
     sources = _iter_upload_sources(paths)
     if not sources:
-        raise ValueError(
-            _tr("No {0} files found in the selected item(s).").format(SAMPLES_FILE)
-        )
+        raise ValueError(_tr("No {0} files found in the selected item(s).").format(SAMPLES_FILE))
 
     conn = connect_cache()
     imported = []
@@ -471,7 +472,9 @@ def rename_run(key, new_name):
 def cached_run_payload(run_id):
     conn = connect_cache()
     try:
-        row = conn.execute("SELECT * FROM runs WHERE key = ? OR id = ?", (run_id, run_id)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM runs WHERE key = ? OR id = ?", (run_id, run_id)
+        ).fetchone()
         if not row:
             return None
         record = {
@@ -506,7 +509,7 @@ def numeric_columns(rows):
         return []
     excluded = {"run_id", "timestamp", "start_temp"}
     columns = []
-    for column in rows[0].keys():
+    for column in rows[0]:
         if column in excluded:
             continue
         values = [to_float(row.get(column)) for row in rows[:50]]
@@ -535,7 +538,9 @@ def run_record(samples_path, key=None, group=None):
         "cost": to_float(summary.get("cost")),
         "tail_mae": to_float(summary.get("tail_mae")),
         "overshoot": first_float(summary, ["overshoot", "overshoot_max", "max_overshoot"]),
-        "settle_time_s": first_float(summary, ["settle_time_s", "time_to_settle_s", "settling_time_s"]),
+        "settle_time_s": first_float(
+            summary, ["settle_time_s", "time_to_settle_s", "settling_time_s"]
+        ),
         "start_time": format_ts(start_ts),
         "end_time": format_ts(end_ts),
     }
@@ -567,12 +572,26 @@ def run_annotations(samples, summary, bands):
     annotations = []
 
     if start_temp is not None:
-        annotations.append({"type": "point", "kind": "start", "x": elapsed[0], "y": start_temp, "label": _tr("Start temp")})
+        annotations.append(
+            {
+                "type": "point",
+                "kind": "start",
+                "x": elapsed[0],
+                "y": start_temp,
+                "label": _tr("Start temp"),
+            }
+        )
     if target is not None:
-        annotations.append({"type": "line-y", "kind": "target", "y": target, "label": _tr("Target")})
+        annotations.append(
+            {"type": "line-y", "kind": "target", "y": target, "label": _tr("Target")}
+        )
 
     if target is not None:
-        valid_pairs = [(x_value, temp) for x_value, temp in zip(elapsed, temp_values) if temp is not None]
+        valid_pairs = [
+            (x_value, temp)
+            for x_value, temp in zip(elapsed, temp_values, strict=False)
+            if temp is not None
+        ]
         if valid_pairs:
             direction = 1.0 if start_temp is not None and start_temp > target else -1.0
             if direction > 0:
@@ -582,31 +601,37 @@ def run_annotations(samples, summary, bands):
                 overshoot_pair = max(valid_pairs, key=lambda pair: pair[1] - target)
                 overshoot_value = max(0.0, overshoot_pair[1] - target)
             if overshoot_value > 0:
-                annotations.append({
-                    "type": "point",
-                    "kind": "overshoot",
-                    "x": overshoot_pair[0],
-                    "y": overshoot_pair[1],
-                    "label": _tr("Max overshoot {0:g}").format(overshoot_value),
-                })
+                annotations.append(
+                    {
+                        "type": "point",
+                        "kind": "overshoot",
+                        "x": overshoot_pair[0],
+                        "y": overshoot_pair[1],
+                        "label": _tr("Max overshoot {0:g}").format(overshoot_value),
+                    }
+                )
 
     settle_time = first_float(summary, ["settle_time_s", "time_to_settle_s", "settling_time_s"])
     duration = first_float(summary, ["duration_s"])
     if settle_time is not None:
-        annotations.append({
-            "type": "region-x",
-            "kind": "settling",
-            "x0": settle_time,
-            "x1": duration if duration is not None and duration > settle_time else max(elapsed),
-            "label": _tr("Settling region"),
-        })
+        annotations.append(
+            {
+                "type": "region-x",
+                "kind": "settling",
+                "x0": settle_time,
+                "x1": duration if duration is not None and duration > settle_time else max(elapsed),
+                "label": _tr("Settling region"),
+            }
+        )
 
     for row in bands:
         change_x = first_float(row, ["timestamp", "elapsed_s", "start_s", "tail_start_s", "time_s"])
         if change_x is not None:
             if first_timestamp is not None and change_x >= first_timestamp:
                 change_x -= first_timestamp
-            annotations.append({"type": "line-x", "kind": "pid", "x": change_x, "label": _tr("PID change")})
+            annotations.append(
+                {"type": "line-x", "kind": "pid", "x": change_x, "label": _tr("PID change")}
+            )
 
     invalid_start = None
     for index, row in enumerate(samples):
@@ -616,10 +641,26 @@ def run_annotations(samples, summary, bands):
         if invalid and invalid_start is None:
             invalid_start = elapsed[index]
         elif not invalid and invalid_start is not None:
-            annotations.append({"type": "region-x", "kind": "invalid", "x0": invalid_start, "x1": elapsed[index], "label": _tr("Invalid region")})
+            annotations.append(
+                {
+                    "type": "region-x",
+                    "kind": "invalid",
+                    "x0": invalid_start,
+                    "x1": elapsed[index],
+                    "label": _tr("Invalid region"),
+                }
+            )
             invalid_start = None
     if invalid_start is not None:
-        annotations.append({"type": "region-x", "kind": "invalid", "x0": invalid_start, "x1": elapsed[-1], "label": _tr("Invalid region")})
+        annotations.append(
+            {
+                "type": "region-x",
+                "kind": "invalid",
+                "x0": invalid_start,
+                "x1": elapsed[-1],
+                "label": _tr("Invalid region"),
+            }
+        )
 
     return annotations
 
@@ -674,12 +715,14 @@ def run_series(run_id, requested_columns):
     points = []
     for index, row in enumerate(samples):
         timestamp = to_float(row.get("timestamp"))
-        points.append({
-            "i": index,
-            "t": timestamp,
-            "label": format_ts(timestamp) if timestamp is not None else str(index),
-            "values": {column: to_float(row.get(column)) for column in y_columns},
-        })
+        points.append(
+            {
+                "i": index,
+                "t": timestamp,
+                "label": format_ts(timestamp) if timestamp is not None else str(index),
+                "values": {column: to_float(row.get(column)) for column in y_columns},
+            }
+        )
     return {"run_id": run_id, "x_column": x_column, "columns": y_columns, "points": points}
 
 
@@ -734,12 +777,17 @@ def bounded_float(payload, name, default, low, high):
 @lru_cache(maxsize=1)
 def load_gru_model():
     import torch
+
     from app.model.simulation import DEFAULT_CHECKPOINT, DEFAULT_FEATURE_NAMES, load_model
 
     device = torch.device("cpu")
     model, checkpoint = load_model(DEFAULT_CHECKPOINT, device)
-    feature_names = list(checkpoint.get("feature_names", DEFAULT_FEATURE_NAMES))
-    window_steps = int(checkpoint.get("window_steps", 60))
+    # checkpoint is dict[str, object] (heterogeneous pickled contents), so
+    # .get() types as object here regardless of the fallback's type -- cast
+    # before the list()/int() coercion that already does the real
+    # (deliberately permissive) type-narrowing at runtime.
+    feature_names = list(cast(list, checkpoint.get("feature_names", DEFAULT_FEATURE_NAMES)))
+    window_steps = int(cast(int, checkpoint.get("window_steps", 60)))
     return model, checkpoint, feature_names, window_steps, device, str(DEFAULT_CHECKPOINT)
 
 
@@ -769,21 +817,23 @@ def simulate_gru_run(payload):
     points = []
     for index, row in enumerate(rows):
         elapsed_s = to_float(row.get("elapsed_s"))
-        points.append({
-            "i": int(row.get("step", index + 1)),
-            "t": elapsed_s,
-            "label": f"{elapsed_s or 0:g}s",
-            "values": {
-                "temp": to_float(row.get("temp")),
-                "temp_ref": to_float(row.get("temp_ref")),
-                "error": to_float(row.get("error")),
-                "u": to_float(row.get("u")),
-                "u_p": to_float(row.get("u_p")),
-                "u_i": to_float(row.get("u_i")),
-                "u_d": to_float(row.get("u_d")),
-                "pred_delta": to_float(row.get("pred_delta")),
-            },
-        })
+        points.append(
+            {
+                "i": int(row.get("step", index + 1)),
+                "t": elapsed_s,
+                "label": f"{elapsed_s or 0:g}s",
+                "values": {
+                    "temp": to_float(row.get("temp")),
+                    "temp_ref": to_float(row.get("temp_ref")),
+                    "error": to_float(row.get("error")),
+                    "u": to_float(row.get("u")),
+                    "u_p": to_float(row.get("u_p")),
+                    "u_i": to_float(row.get("u_i")),
+                    "u_d": to_float(row.get("u_d")),
+                    "pred_delta": to_float(row.get("pred_delta")),
+                },
+            }
+        )
 
     return {
         "checkpoint": checkpoint_path,

@@ -1,23 +1,29 @@
 """DeepVacDesktop — the main application window."""
+
 from PySide6.QtCore import QPoint, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QHBoxLayout, QMainWindow, QMenu, QSizeGrip, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QHBoxLayout,
+    QMainWindow,
+    QMenu,
+    QSizeGrip,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.common import ICON_PATH, _nav_icon, _svg_icon
-from app.title_bar import TitleBar
-from app.tab_system import EditorArea
-from app.services import settings_service, i18n_service
-from app.services.tcp_client import ChamberConnection
+from app.services import i18n_service, settings_service
 from app.services.opc_broadcast_server import OpcBroadcastServer
-from app.views.dashboard  import DashboardMixin
-from app.views.runs       import RunsMixin
-from app.views.simulator  import SimulatorMixin
-from app.views.reports    import ReportsMixin
+from app.services.tcp_client import ChamberConnection
+from app.tab_system import EditorArea
+from app.title_bar import TitleBar
+from app.views.dashboard import DashboardMixin
 from app.views.monitoring import MonitoringMixin
-from app.views.opc        import OpcMixin
+from app.views.opc import OpcMixin
+from app.views.reports import ReportsMixin
+from app.views.runs import RunsMixin
+from app.views.simulator import SimulatorMixin
 
 
 class DeepVacDesktop(
@@ -32,7 +38,7 @@ class DeepVacDesktop(
     def __init__(self, splash=None, current_user=None):
         super().__init__()
         self.splash = splash
-        self.current_user     = current_user or {"id": None, "name": "User", "email": ""}
+        self.current_user = current_user or {"id": None, "name": "User", "email": ""}
         self.logout_requested = False
         self.setWindowTitle(self.tr("DeepVac Dashboard"))
         self.setWindowIcon(QIcon(ICON_PATH))
@@ -40,20 +46,20 @@ class DeepVacDesktop(
         self.resize(1500, 920)
         self.setMinimumSize(1100, 700)
 
-        self.runs             = []
-        self.dark             = settings_service.load_theme()
-        self.sim_worker       = None
-        self.sim_series       = None
-        self._sim_anim_timer  = None
-        self._sim_anim_data   = []
+        self.runs = []
+        self.dark = settings_service.load_theme()
+        self.sim_worker = None
+        self.sim_series = None
+        self._sim_anim_timer = None
+        self._sim_anim_data = []
         self._sim_anim_curves = []
-        self._sim_anim_idx    = 0
-        self._sim_anim_total  = 0
-        self._monitor_alarms  = []
+        self._sim_anim_idx = 0
+        self._sim_anim_total = 0
+        self._monitor_alarms = []
 
         self._chamber_connected = False
-        self.tcp         = ChamberConnection(self)
-        self.opc_server  = OpcBroadcastServer(self)
+        self.tcp = ChamberConnection(self)
+        self.opc_server = OpcBroadcastServer(self)
 
         self._build_ui()
 
@@ -75,6 +81,7 @@ class DeepVacDesktop(
 
     def _run_background_backup(self):
         from app.services import backup_service
+
         try:
             backup_service.backup_all()
         except Exception as exc:
@@ -130,37 +137,42 @@ class DeepVacDesktop(
 
     def _build_ui(self):
         central = QWidget()
-        outer   = QVBoxLayout(central)
+        outer = QVBoxLayout(central)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         self.title_bar = TitleBar(self)
         outer.addWidget(self.title_bar)
 
-        body     = QWidget()
+        body = QWidget()
         body_lay = QHBoxLayout(body)
         body_lay.setContentsMargins(0, 0, 0, 0)
         body_lay.setSpacing(0)
         body_lay.addWidget(self._sidebar())
 
-        self.content_stack    = QStackedWidget()
-        self.dashboard_widget = self._dashboard_view()   # 0
-        self.runs_widget      = self._runs_view()         # 1
-        self.editor_area      = EditorArea()              # 2
+        self.content_stack = QStackedWidget()
+        self.dashboard_widget = self._dashboard_view()  # 0
+        self.runs_widget = self._runs_view()  # 1
+        self.editor_area = EditorArea()  # 2
         self.editor_area.active_page_changed.connect(self._on_active_page_changed)
-        self.sim_widget       = self._sim_view()          # 3
-        self.reports_widget   = self._reports_view()      # 4
-        self.monitor_widget   = self._monitoring_view()   # 5
-        self.opc_widget       = self._opc_view()           # 6
-        for w in [self.dashboard_widget, self.runs_widget,
-                  self.editor_area, self.sim_widget,
-                  self.reports_widget, self.monitor_widget,
-                  self.opc_widget]:
+        self.sim_widget = self._sim_view()  # 3
+        self.reports_widget = self._reports_view()  # 4
+        self.monitor_widget = self._monitoring_view()  # 5
+        self.opc_widget = self._opc_view()  # 6
+        for w in [
+            self.dashboard_widget,
+            self.runs_widget,
+            self.editor_area,
+            self.sim_widget,
+            self.reports_widget,
+            self.monitor_widget,
+            self.opc_widget,
+        ]:
             self.content_stack.addWidget(w)
 
         body_lay.addWidget(self.content_stack, 1)
         outer.addWidget(body, 1)
 
-        grip     = QSizeGrip(central)
+        grip = QSizeGrip(central)
         grip.setFixedSize(14, 14)
         grip_lay = QHBoxLayout()
         grip_lay.setContentsMargins(0, 0, 0, 0)
@@ -172,7 +184,8 @@ class DeepVacDesktop(
         self._nav_to(0)
 
     def _sidebar(self):
-        from PySide6.QtWidgets import QFrame, QVBoxLayout, QPushButton
+        from PySide6.QtWidgets import QFrame, QPushButton, QVBoxLayout
+
         bar = QFrame()
         bar.setObjectName("activityBar")
         bar.setFixedWidth(48)
@@ -181,13 +194,13 @@ class DeepVacDesktop(
         lay.setSpacing(2)
 
         nav_defs = [
-            ("act_dashboard_btn", "house",        self.tr("Dashboard"),  0),
-            ("act_runs_btn",      "database",     self.tr("Runs"),       1),
-            ("act_analysis_btn",  "activity",     self.tr("Analysis"),   2),
-            ("act_sim_btn",       "cpu",          self.tr("Simulator"),  3),
-            ("act_reports_btn",   "file-earmark", self.tr("Reports"),    4),
-            ("act_monitor_btn",   "graph-up",     self.tr("Monitor"),    5),
-            ("act_opc_btn",       "broadcast",    self.tr("OPC Server"), 6),
+            ("act_dashboard_btn", "house", self.tr("Dashboard"), 0),
+            ("act_runs_btn", "database", self.tr("Runs"), 1),
+            ("act_analysis_btn", "activity", self.tr("Analysis"), 2),
+            ("act_sim_btn", "cpu", self.tr("Simulator"), 3),
+            ("act_reports_btn", "file-earmark", self.tr("Reports"), 4),
+            ("act_monitor_btn", "graph-up", self.tr("Monitor"), 5),
+            ("act_opc_btn", "broadcast", self.tr("OPC Server"), 6),
         ]
         self._nav_buttons = []
         for attr, icon_name, label, idx in nav_defs:
@@ -244,9 +257,9 @@ class DeepVacDesktop(
     # ── Settings ──────────────────────────────────────────────────────────────
 
     def _show_settings(self):
-        menu     = QMenu(self)
-        themes   = menu.addMenu(self.tr("Themes"))
-        act_dark  = themes.addAction(self.tr("Dark"))
+        menu = QMenu(self)
+        themes = menu.addMenu(self.tr("Themes"))
+        act_dark = themes.addAction(self.tr("Dark"))
         act_dark.setCheckable(True)
         act_dark.setChecked(self.dark)
         act_light = themes.addAction(self.tr("Light"))
@@ -263,9 +276,9 @@ class DeepVacDesktop(
             lang_actions[act] = code
 
         menu.addSeparator()
-        act_backup_now    = menu.addAction(self.tr("Back Up Now"))
-        act_open_backups  = menu.addAction(self.tr("Open Backups Folder"))
-        btn    = self.act_settings_btn
+        act_backup_now = menu.addAction(self.tr("Back Up Now"))
+        act_open_backups = menu.addAction(self.tr("Open Backups Folder"))
+        btn = self.act_settings_btn
         chosen = menu.exec(btn.mapToGlobal(QPoint(btn.width() + 4, 0)))
         if chosen == act_dark and not self.dark:
             self.dark = True
@@ -286,17 +299,22 @@ class DeepVacDesktop(
 
     def _change_language(self, code):
         from PySide6.QtWidgets import QMessageBox
+
         if code == settings_service.load_language():
             return
         settings_service.save_language(code)
         QMessageBox.information(
-            self, self.tr("Language"),
-            self.tr("The new language will take effect the next time you start DeepVac."))
+            self,
+            self.tr("Language"),
+            self.tr("The new language will take effect the next time you start DeepVac."),
+        )
 
     def _backup_now(self):
         from PySide6.QtCore import QCoreApplication
         from PySide6.QtWidgets import QMessageBox
+
         from app.services import backup_service
+
         try:
             results = backup_service.backup_all(force=True)
         except Exception as exc:
@@ -306,14 +324,19 @@ class DeepVacDesktop(
         # this PySide6 version -- call QCoreApplication.translate() directly
         # with the exact context pyside6-lupdate recorded for this string.
         QMessageBox.information(
-            self, self.tr("Backup"),
+            self,
+            self.tr("Backup"),
             QCoreApplication.translate(
-                "DeepVacDesktop", "Backed up %n database(s) to data/backups/.", "", len(results)))
+                "DeepVacDesktop", "Backed up %n database(s) to data/backups/.", "", len(results)
+            ),
+        )
 
     def _open_backups_folder(self):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
+
         from app.services.backup_service import BACKUPS_DIR
+
         BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(BACKUPS_DIR)))
 
@@ -325,8 +348,8 @@ class DeepVacDesktop(
         header.setEnabled(False)
         menu.addSeparator()
         act_profile = menu.addAction(self.tr("Profile"))
-        act_logout  = menu.addAction(self.tr("Log out"))
-        btn    = self.act_account_btn
+        act_logout = menu.addAction(self.tr("Log out"))
+        btn = self.act_account_btn
         chosen = menu.exec(btn.mapToGlobal(QPoint(btn.width() + 4, 0)))
         if chosen == act_profile:
             self._show_profile_dialog()
@@ -335,6 +358,7 @@ class DeepVacDesktop(
 
     def _show_profile_dialog(self):
         from app.profile_dialog import ProfileDialog
+
         dlg = ProfileDialog(self.current_user, self)
         dlg.exec()
         self.current_user = dlg.updated_user
@@ -342,7 +366,9 @@ class DeepVacDesktop(
 
     def _logout(self):
         from PySide6.QtCore import QSettings
+
         from app.services import auth_service
+
         settings = QSettings("DeepVac", "Insight")
         token = settings.value("auth/remember_token", "")
         if token:
@@ -355,6 +381,7 @@ class DeepVacDesktop(
 
     def splash_msg(self, msg):
         from PySide6.QtWidgets import QApplication
+
         if self.splash:
             self.splash.showMessage(msg, Qt.AlignCenter | Qt.AlignBottom, Qt.white)
             QApplication.processEvents()
@@ -362,7 +389,7 @@ class DeepVacDesktop(
     def _clear_layout(self, layout):
         while layout.count():
             item = layout.takeAt(0)
-            w    = item.widget()
+            w = item.widget()
             if w:
                 w.deleteLater()
 
@@ -371,39 +398,63 @@ class DeepVacDesktop(
     def apply_theme(self):
         if self.dark:
             c = {
-                "bg":       "#0b1020", "panel":  "#111827", "panel2": "#0f172a",
-                "panel3":   "#1e293b", "text":   "#f8fafc", "muted":  "#94a3b8",
-                "border":   "#253247", "border2":"#1f2937", "accent": "#60a5fa",
-                "accent2":  "#2563eb", "atext":  "#ffffff", "hover":  "#172033",
-                "sel":      "#1d4ed8", "talt":   "#0d1526", "sbg":    "#0b1020",
-                "sh":       "#334155",
-                "tab_bg":          "#1e2433", "tab_active":      "#111827",
-                "tab_border":      "#60a5fa", "tab_text":        "#94a3b8",
+                "bg": "#0b1020",
+                "panel": "#111827",
+                "panel2": "#0f172a",
+                "panel3": "#1e293b",
+                "text": "#f8fafc",
+                "muted": "#94a3b8",
+                "border": "#253247",
+                "border2": "#1f2937",
+                "accent": "#60a5fa",
+                "accent2": "#2563eb",
+                "atext": "#ffffff",
+                "hover": "#172033",
+                "sel": "#1d4ed8",
+                "talt": "#0d1526",
+                "sbg": "#0b1020",
+                "sh": "#334155",
+                "tab_bg": "#1e2433",
+                "tab_active": "#111827",
+                "tab_border": "#60a5fa",
+                "tab_text": "#94a3b8",
                 "tab_active_text": "#f8fafc",
             }
         else:
             c = {
-                "bg":       "#eef2f7", "panel":  "#ffffff", "panel2": "#f8fafc",
-                "panel3":   "#eef2ff", "text":   "#0f172a", "muted":  "#64748b",
-                "border":   "#d8e0ea", "border2":"#e5eaf2", "accent": "#2563eb",
-                "accent2":  "#1d4ed8", "atext":  "#ffffff", "hover":  "#f1f5f9",
-                "sel":      "#dbeafe", "talt":   "#f8fafc", "sbg":    "#eef2f7",
-                "sh":       "#cbd5e1",
-                "tab_bg":          "#ececec", "tab_active":      "#ffffff",
-                "tab_border":      "#2563eb", "tab_text":        "#64748b",
+                "bg": "#eef2f7",
+                "panel": "#ffffff",
+                "panel2": "#f8fafc",
+                "panel3": "#eef2ff",
+                "text": "#0f172a",
+                "muted": "#64748b",
+                "border": "#d8e0ea",
+                "border2": "#e5eaf2",
+                "accent": "#2563eb",
+                "accent2": "#1d4ed8",
+                "atext": "#ffffff",
+                "hover": "#f1f5f9",
+                "sel": "#dbeafe",
+                "talt": "#f8fafc",
+                "sbg": "#eef2f7",
+                "sh": "#cbd5e1",
+                "tab_bg": "#ececec",
+                "tab_active": "#ffffff",
+                "tab_border": "#2563eb",
+                "tab_text": "#64748b",
                 "tab_active_text": "#0f172a",
             }
 
         css = f"""
             QWidget {{
-                background: {c['bg']};
-                color: {c['text']};
+                background: {c["bg"]};
+                color: {c["text"]};
                 font-family: "Segoe UI", "Inter", "Arial";
                 font-size: 10.5pt;
             }}
             QWidget#titleBar {{
-                background: {c['panel2']};
-                border-bottom: 2px solid {c['accent']};
+                background: {c["panel2"]};
+                border-bottom: 2px solid {c["accent"]};
                 min-height: 40px; max-height: 40px;
             }}
             QWidget#titleBarLogoArea {{
@@ -411,40 +462,40 @@ class DeepVacDesktop(
             }}
             QLabel#titleBarBrand {{
                 font-size: 11px; font-weight: 900;
-                color: {c['accent']};
+                color: {c["accent"]};
                 background: transparent;
             }}
             QPushButton#titleCenter {{
-                background: {c['panel3']};
-                border: 1px solid {c['border']};
+                background: {c["panel3"]};
+                border: 1px solid {c["border"]};
                 border-radius: 4px;
-                color: {c['muted']};
+                color: {c["muted"]};
                 font-size: 10pt;
                 padding: 0 10px;
                 text-align: center;
             }}
             QPushButton#titleCenter:hover {{
-                border-color: {c['accent']};
-                color: {c['text']};
-                background: {c['hover']};
+                border-color: {c["accent"]};
+                color: {c["text"]};
+                background: {c["hover"]};
             }}
             QPushButton#winBtn {{
                 background: transparent;
                 border: none;
                 border-radius: 0;
-                color: {c['muted']};
+                color: {c["muted"]};
                 font-size: 11px;
                 padding: 0;
             }}
             QPushButton#winBtn:hover {{
-                background: {c['hover']};
-                color: {c['text']};
+                background: {c["hover"]};
+                color: {c["text"]};
             }}
             QPushButton#winBtnClose {{
                 background: transparent;
                 border: none;
                 border-radius: 0;
-                color: {c['muted']};
+                color: {c["muted"]};
                 font-size: 11px;
                 padding: 0;
             }}
@@ -470,228 +521,228 @@ class DeepVacDesktop(
                 color: #ef4444; font-size: 11px; background: transparent;
             }}
             QLabel#statusText {{
-                font-size: 9.5pt; color: {c['muted']}; background: transparent;
+                font-size: 9.5pt; color: {c["muted"]}; background: transparent;
             }}
             QPushButton#titleIconBtn {{
                 background: transparent; border: none;
                 border-radius: 4px; font-size: 14px; padding: 0;
             }}
-            QPushButton#titleIconBtn:hover {{ background: {c['hover']}; }}
+            QPushButton#titleIconBtn:hover {{ background: {c["hover"]}; }}
             QFrame#activityBar {{
-                background: {c['panel2']};
-                border-right: 1px solid {c['border']};
+                background: {c["panel2"]};
+                border-right: 1px solid {c["border"]};
                 min-width: 48px; max-width: 48px;
             }}
             QPushButton#navButton {{
                 background: transparent;
                 border: none;
                 border-left: 3px solid transparent;
-                color: {c['muted']};
+                color: {c["muted"]};
                 font-size: 20px; padding: 0; border-radius: 0; text-align: center;
             }}
             QPushButton#navButton:hover {{
-                color: {c['text']}; background: {c['hover']};
+                color: {c["text"]}; background: {c["hover"]};
             }}
             QPushButton#navButton:checked {{
-                color: {c['accent']};
-                border-left-color: {c['accent']};
-                background: {c['hover']};
+                color: {c["accent"]};
+                border-left-color: {c["accent"]};
+                background: {c["hover"]};
             }}
             QLabel#pageTitle {{
                 font-size: 22px; font-weight: 800;
-                color: {c['text']}; background: transparent;
+                color: {c["text"]}; background: transparent;
             }}
             QFrame#runsPanel {{
-                background: {c['panel']};
-                border-right: 1px solid {c['border']};
+                background: {c["panel"]};
+                border-right: 1px solid {c["border"]};
             }}
             QFrame#runsPanelHeader {{
-                background: {c['panel']};
-                border-bottom: 1px solid {c['border2']};
+                background: {c["panel"]};
+                border-bottom: 1px solid {c["border2"]};
                 min-height: 36px; max-height: 36px;
             }}
             QLabel#sidebarPanelLabel {{
                 font-size: 10px; font-weight: 800;
-                color: {c['muted']}; letter-spacing: 1.2px; background: transparent;
+                color: {c["muted"]}; letter-spacing: 1.2px; background: transparent;
             }}
             QPushButton#runsUploadButton {{
-                background: {c['panel3']};
-                border: 1px solid {c['border']};
-                border-radius: 6px; color: {c['muted']};
+                background: {c["panel3"]};
+                border: 1px solid {c["border"]};
+                border-radius: 6px; color: {c["muted"]};
                 padding: 0; min-width: 24px; max-width: 24px;
                 min-height: 24px; max-height: 24px;
             }}
             QPushButton#runsUploadButton:hover {{
-                color: {c['text']}; border-color: {c['accent']}; background: {c['hover']};
+                color: {c["text"]}; border-color: {c["accent"]}; background: {c["hover"]};
             }}
-            QWidget#workspaceBody {{ background: {c['bg']}; }}
+            QWidget#workspaceBody {{ background: {c["bg"]}; }}
             QFrame#card {{
-                background: {c['panel']};
-                border: 1px solid {c['border']};
+                background: {c["panel"]};
+                border: 1px solid {c["border"]};
                 border-radius: 10px;
             }}
             QLabel#title {{
-                font-size: 18px; font-weight: 800; color: {c['text']};
+                font-size: 18px; font-weight: 800; color: {c["text"]};
             }}
             QLabel#sectionLabel {{
                 font-size: 10px; font-weight: 800;
-                color: {c['muted']}; letter-spacing: 0.9px; background: transparent;
+                color: {c["muted"]}; letter-spacing: 0.9px; background: transparent;
             }}
             QFrame#inlineStat {{
-                background: {c['panel2']};
-                border: 1px solid {c['border2']};
+                background: {c["panel2"]};
+                border: 1px solid {c["border2"]};
                 border-radius: 7px; min-width: 76px;
             }}
             QLabel#inlineStatLabel {{
                 font-size: 9px; font-weight: 800;
-                color: {c['muted']}; letter-spacing: 0.7px; background: transparent;
+                color: {c["muted"]}; letter-spacing: 0.7px; background: transparent;
             }}
             QLabel#inlineStatValue {{
                 font-size: 13px; font-weight: 800;
-                color: {c['text']}; background: transparent;
+                color: {c["text"]}; background: transparent;
             }}
             QPushButton {{
-                background: {c['panel2']}; color: {c['text']};
-                border: 1px solid {c['border']};
+                background: {c["panel2"]}; color: {c["text"]};
+                border: 1px solid {c["border"]};
                 border-radius: 8px; padding: 6px 12px; font-weight: 650;
             }}
-            QPushButton:hover {{ background: {c['hover']}; border-color: {c['accent']}; }}
-            QPushButton:pressed {{ background: {c['panel3']}; padding-top: 7px; padding-bottom: 5px; }}
-            QPushButton:disabled {{ color: {c['muted']}; background: {c['panel2']}; border-color: {c['border2']}; }}
+            QPushButton:hover {{ background: {c["hover"]}; border-color: {c["accent"]}; }}
+            QPushButton:pressed {{ background: {c["panel3"]}; padding-top: 7px; padding-bottom: 5px; }}
+            QPushButton:disabled {{ color: {c["muted"]}; background: {c["panel2"]}; border-color: {c["border2"]}; }}
             QPushButton#primaryButton {{
-                background: {c['accent2']}; color: {c['atext']}; border-color: {c['accent2']};
+                background: {c["accent2"]}; color: {c["atext"]}; border-color: {c["accent2"]};
             }}
-            QPushButton#primaryButton:hover {{ background: {c['accent']}; border-color: {c['accent']}; }}
-            QPushButton#secondaryButton {{ color: {c['muted']}; }}
+            QPushButton#primaryButton:hover {{ background: {c["accent"]}; border-color: {c["accent"]}; }}
+            QPushButton#secondaryButton {{ color: {c["muted"]}; }}
             QLineEdit, QComboBox {{
-                background: {c['panel2']}; color: {c['text']};
-                border: 1px solid {c['border']}; border-radius: 8px;
+                background: {c["panel2"]}; color: {c["text"]};
+                border: 1px solid {c["border"]}; border-radius: 8px;
                 padding: 6px 9px;
-                selection-background-color: {c['accent2']};
+                selection-background-color: {c["accent2"]};
             }}
             QLineEdit:focus, QComboBox:hover, QComboBox:focus {{
-                border-color: {c['accent']}; background: {c['panel']};
+                border-color: {c["accent"]}; background: {c["panel"]};
             }}
             QLineEdit#searchBox {{ padding: 8px 10px; }}
             QComboBox::drop-down {{ width: 22px; border: 0; }}
             QComboBox QAbstractItemView {{
-                background: {c['panel']}; color: {c['text']};
-                border: 1px solid {c['border']}; border-radius: 8px;
-                selection-background-color: {c['sel']}; padding: 4px; outline: 0;
+                background: {c["panel"]}; color: {c["text"]};
+                border: 1px solid {c["border"]}; border-radius: 8px;
+                selection-background-color: {c["sel"]}; padding: 4px; outline: 0;
             }}
             QMenu {{
-                background: {c['panel']}; color: {c['text']};
-                border: 1px solid {c['border']}; border-radius: 8px; padding: 4px;
+                background: {c["panel"]}; color: {c["text"]};
+                border: 1px solid {c["border"]}; border-radius: 8px; padding: 4px;
             }}
             QMenu::item {{ padding: 7px 22px 7px 10px; border-radius: 6px; }}
-            QMenu::item:selected {{ background: {c['sel']}; color: {c['atext']}; }}
-            QCheckBox {{ spacing: 7px; color: {c['muted']}; background: transparent; font-weight: 650; }}
+            QMenu::item:selected {{ background: {c["sel"]}; color: {c["atext"]}; }}
+            QCheckBox {{ spacing: 7px; color: {c["muted"]}; background: transparent; font-weight: 650; }}
             QCheckBox::indicator {{
                 width: 15px; height: 15px; border-radius: 4px;
-                border: 1px solid {c['border']}; background: {c['panel2']};
+                border: 1px solid {c["border"]}; background: {c["panel2"]};
             }}
-            QCheckBox::indicator:hover {{ border-color: {c['accent']}; }}
-            QCheckBox::indicator:checked {{ background: {c['accent2']}; border-color: {c['accent2']}; }}
+            QCheckBox::indicator:hover {{ border-color: {c["accent"]}; }}
+            QCheckBox::indicator:checked {{ background: {c["accent2"]}; border-color: {c["accent2"]}; }}
             QListWidget, QTableWidget {{
-                background: {c['panel2']}; color: {c['text']};
-                border: 1px solid {c['border2']}; border-radius: 8px;
+                background: {c["panel2"]}; color: {c["text"]};
+                border: 1px solid {c["border2"]}; border-radius: 8px;
                 padding: 4px; outline: 0; gridline-color: transparent;
-                alternate-background-color: {c['talt']};
-                selection-background-color: {c['sel']};
-                selection-color: {c['atext']};
+                alternate-background-color: {c["talt"]};
+                selection-background-color: {c["sel"]};
+                selection-color: {c["atext"]};
             }}
             QListWidget::item {{
                 min-height: 28px; padding: 6px 8px; border-radius: 6px; margin: 1px;
             }}
-            QListWidget::item:hover {{ background: {c['hover']}; }}
-            QListWidget::item:selected {{ background: {c['sel']}; color: {c['atext']}; }}
+            QListWidget::item:hover {{ background: {c["hover"]}; }}
+            QListWidget::item:selected {{ background: {c["sel"]}; color: {c["atext"]}; }}
             QTableWidget::item {{ padding: 5px; border: 0; }}
             QHeaderView::section {{
-                background: {c['panel']}; color: {c['muted']}; padding: 8px 6px;
-                border: 0; border-bottom: 1px solid {c['border']}; font-weight: 800;
+                background: {c["panel"]}; color: {c["muted"]}; padding: 8px 6px;
+                border: 0; border-bottom: 1px solid {c["border"]}; font-weight: 800;
             }}
             QTableCornerButton::section {{
-                background: {c['panel']}; border: 0; border-bottom: 1px solid {c['border']};
+                background: {c["panel"]}; border: 0; border-bottom: 1px solid {c["border"]};
             }}
-            QScrollArea, QScrollArea > QWidget > QWidget {{ background: {c['bg']}; border: 0; }}
-            QSplitter::handle {{ background: {c['border']}; }}
+            QScrollArea, QScrollArea > QWidget > QWidget {{ background: {c["bg"]}; border: 0; }}
+            QSplitter::handle {{ background: {c["border"]}; }}
             QScrollBar:vertical {{
-                background: {c['sbg']}; width: 10px; margin: 2px; border-radius: 5px;
+                background: {c["sbg"]}; width: 10px; margin: 2px; border-radius: 5px;
             }}
             QScrollBar::handle:vertical {{
-                background: {c['sh']}; min-height: 28px; border-radius: 5px;
+                background: {c["sh"]}; min-height: 28px; border-radius: 5px;
             }}
-            QScrollBar::handle:vertical:hover {{ background: {c['accent']}; }}
+            QScrollBar::handle:vertical:hover {{ background: {c["accent"]}; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
             QScrollBar::add-page:vertical,  QScrollBar::sub-page:vertical {{
                 height: 0; background: transparent; border: 0;
             }}
             QScrollBar:horizontal {{
-                background: {c['sbg']}; height: 10px; margin: 2px; border-radius: 5px;
+                background: {c["sbg"]}; height: 10px; margin: 2px; border-radius: 5px;
             }}
             QScrollBar::handle:horizontal {{
-                background: {c['sh']}; min-width: 28px; border-radius: 5px;
+                background: {c["sh"]}; min-width: 28px; border-radius: 5px;
             }}
-            QScrollBar::handle:horizontal:hover {{ background: {c['accent']}; }}
+            QScrollBar::handle:horizontal:hover {{ background: {c["accent"]}; }}
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
                 width: 0; background: transparent; border: 0;
             }}
-            QWidget#tabBar     {{ background: {c['tab_bg']}; border-bottom: 1px solid {c['border']}; }}
-            QWidget#tabContainer {{ background: {c['tab_bg']}; }}
+            QWidget#tabBar     {{ background: {c["tab_bg"]}; border-bottom: 1px solid {c["border"]}; }}
+            QWidget#tabContainer {{ background: {c["tab_bg"]}; }}
             QFrame#tabItem {{
-                background: {c['tab_bg']};
-                border-right: 1px solid {c['border']};
+                background: {c["tab_bg"]};
+                border-right: 1px solid {c["border"]};
                 border-bottom: 2px solid transparent;
                 min-height: 35px; max-height: 35px;
             }}
-            QFrame#tabItem:hover {{ background: {c['hover']}; }}
+            QFrame#tabItem:hover {{ background: {c["hover"]}; }}
             QFrame#tabItem[tabActive="true"] {{
-                background: {c['tab_active']};
-                border-bottom: 2px solid {c['tab_border']};
+                background: {c["tab_active"]};
+                border-bottom: 2px solid {c["tab_border"]};
             }}
             QLabel#tabIcon {{
-                font-size: 9px; color: {c['accent']}; background: transparent;
+                font-size: 9px; color: {c["accent"]}; background: transparent;
             }}
             QLabel#tabLabel {{
-                font-size: 10pt; color: {c['tab_text']}; background: transparent;
+                font-size: 10pt; color: {c["tab_text"]}; background: transparent;
             }}
             QFrame#tabItem[tabActive="true"] QLabel#tabLabel {{
-                color: {c['tab_active_text']};
+                color: {c["tab_active_text"]};
             }}
             QPushButton#tabClose {{
                 background: transparent; border: none;
-                color: {c['muted']}; font-size: 13px; font-weight: 900;
+                color: {c["muted"]}; font-size: 13px; font-weight: 900;
                 padding: 0; border-radius: 3px;
                 min-width: 16px; max-width: 16px;
                 min-height: 16px; max-height: 16px;
             }}
             QPushButton#tabClose:hover {{ background: #e74c3c; color: #ffffff; }}
             QPushButton#editorSyncButton {{
-                background: {c['panel3']};
-                border: 1px solid {c['border']};
-                border-radius: 6px; color: {c['muted']}; font-size: 13px;
+                background: {c["panel3"]};
+                border: 1px solid {c["border"]};
+                border-radius: 6px; color: {c["muted"]}; font-size: 13px;
                 padding: 0; min-width: 28px; max-width: 28px;
                 min-height: 28px; max-height: 28px;
             }}
             QPushButton#editorSyncButton:hover {{
-                color: {c['text']}; border-color: {c['accent']}; background: {c['hover']};
+                color: {c["text"]}; border-color: {c["accent"]}; background: {c["hover"]};
             }}
             QPushButton#editorSyncButton:checked {{
-                color: {c['accent']}; border-color: {c['accent']}; background: {c['panel3']};
+                color: {c["accent"]}; border-color: {c["accent"]}; background: {c["panel3"]};
             }}
-            QFrame#dropIndicator {{ background: {c['accent']}; }}
-            QWidget#editorArea  {{ background: {c['bg']}; }}
-            QSplitter#editorSplitter::handle  {{ background: {c['border']}; width: 4px; }}
-            QSplitter#chartSplitter::handle   {{ background: {c['border']}; width: 4px; }}
-            QSplitter#contentSplitter::handle {{ background: {c['border']}; width: 4px; }}
+            QFrame#dropIndicator {{ background: {c["accent"]}; }}
+            QWidget#editorArea  {{ background: {c["bg"]}; }}
+            QSplitter#editorSplitter::handle  {{ background: {c["border"]}; width: 4px; }}
+            QSplitter#chartSplitter::handle   {{ background: {c["border"]}; width: 4px; }}
+            QSplitter#contentSplitter::handle {{ background: {c["border"]}; width: 4px; }}
             QFrame#ruleRow {{
-                background: {c['panel2']};
-                border: 1px solid {c['border2']};
+                background: {c["panel2"]};
+                border: 1px solid {c["border2"]};
                 border-radius: 7px;
             }}
             QLabel#monitorPlaceholder {{
-                color: {c['muted']}; font-size: 13pt; background: transparent;
+                color: {c["muted"]}; font-size: 13pt; background: transparent;
             }}
         """
         self.setStyleSheet(css)

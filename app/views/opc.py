@@ -5,10 +5,19 @@ spec-compliant OPC UA server — see app/services/opc_broadcast_server.py for
 why. It can only be started once the chamber connection (Live Monitoring)
 is established, since it broadcasts the samples that connection receives.
 """
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
 
@@ -23,10 +32,13 @@ class OpcMixin:
         hdr = QLabel(self.tr("OPC Server"))
         hdr.setObjectName("pageTitle")
         outer.addWidget(hdr)
-        sub = QLabel(self.tr(
-            "Broadcast live chamber data to external TCP clients. Requires an "
-            "active chamber connection (Live Monitoring) — this is a simplified "
-            "JSON broadcast, not a spec-compliant OPC UA server."))
+        sub = QLabel(
+            self.tr(
+                "Broadcast live chamber data to external TCP clients. Requires an "
+                "active chamber connection (Live Monitoring) — this is a simplified "
+                "JSON broadcast, not a spec-compliant OPC UA server."
+            )
+        )
         sub.setObjectName("sectionLabel")
         sub.setWordWrap(True)
         outer.addWidget(sub)
@@ -57,34 +69,45 @@ class OpcMixin:
 
         self._opc_security = QComboBox()
         self._opc_security.addItems(["None", "Basic128Rsa15", "Basic256Sha256"])
-        self._opc_security.setToolTip(self.tr(
-            "Not enforced by the current simplified broadcast server; kept "
-            "here for a future real OPC UA implementation."))
+        self._opc_security.setToolTip(
+            self.tr(
+                "Not enforced by the current simplified broadcast server; kept "
+                "here for a future real OPC UA implementation."
+            )
+        )
 
         self._opc_auth = QComboBox()
         self._opc_auth.addItem(self.tr("Anonymous"), "Anonymous")
         self._opc_auth.addItem(self.tr("Username / Password"), "Username / Password")
-        self._opc_auth.setToolTip(self.tr(
-            "Not enforced by the current simplified broadcast server; kept "
-            "here for a future real OPC UA implementation."))
+        self._opc_auth.setToolTip(
+            self.tr(
+                "Not enforced by the current simplified broadcast server; kept "
+                "here for a future real OPC UA implementation."
+            )
+        )
 
         self._opc_update_rate = QComboBox()
         self._opc_update_rate.addItems(["100 ms", "250 ms", "500 ms", "1 s"])
         self._opc_update_rate.setCurrentIndex(2)
-        self._opc_update_rate.setToolTip(self.tr(
-            "Broadcasts happen as samples arrive from the chamber connection; "
-            "this doesn't throttle them yet."))
+        self._opc_update_rate.setToolTip(
+            self.tr(
+                "Broadcasts happen as samples arrive from the chamber connection; "
+                "this doesn't throttle them yet."
+            )
+        )
 
-        for row_idx, (cap, w) in enumerate([
-            (self.tr("Port"),        self._opc_port),
-            (self.tr("Namespace"),   self._opc_namespace),
-            (self.tr("Security"),    self._opc_security),
-            (self.tr("Auth"),        self._opc_auth),
-            (self.tr("Update rate"), self._opc_update_rate),
-        ]):
-            l = QLabel(cap)
-            l.setObjectName("sectionLabel")
-            grid.addWidget(l, row_idx, 0)
+        for row_idx, (cap, w) in enumerate(
+            [
+                (self.tr("Port"), self._opc_port),
+                (self.tr("Namespace"), self._opc_namespace),
+                (self.tr("Security"), self._opc_security),
+                (self.tr("Auth"), self._opc_auth),
+                (self.tr("Update rate"), self._opc_update_rate),
+            ]
+        ):
+            lbl = QLabel(cap)
+            lbl.setObjectName("sectionLabel")
+            grid.addWidget(lbl, row_idx, 0)
             grid.addWidget(w, row_idx, 1)
         cl.addLayout(grid)
 
@@ -147,7 +170,8 @@ class OpcMixin:
             self.opc_server.stop()
         self._opc_start_btn.setEnabled(connected)
         self._opc_start_btn.setToolTip(
-            "" if connected else self.tr("Connect to the chamber in Live Monitoring first"))
+            "" if connected else self.tr("Connect to the chamber in Live Monitoring first")
+        )
 
     def _on_opc_started(self, port):
         self._opc_start_btn.setText(self.tr("Stop Server"))
@@ -168,12 +192,14 @@ class OpcMixin:
     def _on_opc_clients_changed(self, count):
         if self.opc_server.is_running():
             from PySide6.QtCore import QCoreApplication
+
             port = self._opc_port.value()
             # self.tr()'s %n/plural overload doesn't reliably resolve context
             # in this PySide6 version -- call QCoreApplication.translate()
             # directly with the exact context pyside6-lupdate recorded.
             text = QCoreApplication.translate(
-                "OpcMixin", "Broadcasting on port {0} — %n client(s)", "", count)
+                "OpcMixin", "Broadcasting on port {0} — %n client(s)", "", count
+            )
             self._opc_status_lbl.setText(text.format(port))
 
     def _on_opc_error(self, msg):
@@ -181,23 +207,32 @@ class OpcMixin:
 
     def _opc_update_endpoint_info(self, port):
         import socket
+
         try:
             host_ip = socket.gethostbyname(socket.gethostname())
         except OSError:
             host_ip = "127.0.0.1"
         namespace = self._opc_namespace.text().strip() or self.tr("(none)")
         self._opc_info_lbl.setText(
-            self.tr("Broadcasting") + "\n\n" +
-            self.tr("Host: {0} (or localhost)").format(host_ip) + "\n" +
-            self.tr("Port: {0}").format(port) + "\n" +
-            self.tr("Namespace: {0}").format(namespace) + "\n\n" +
-            self.tr("Protocol: newline-delimited JSON. Connect any TCP client to\n"
-                    "receive live chamber samples as they arrive.")
+            self.tr("Broadcasting")
+            + "\n\n"
+            + self.tr("Host: {0} (or localhost)").format(host_ip)
+            + "\n"
+            + self.tr("Port: {0}").format(port)
+            + "\n"
+            + self.tr("Namespace: {0}").format(namespace)
+            + "\n\n"
+            + self.tr(
+                "Protocol: newline-delimited JSON. Connect any TCP client to\n"
+                "receive live chamber samples as they arrive."
+            )
         )
 
     def _opc_reset_endpoint_info(self):
-        self._opc_info_lbl.setText(self.tr(
-            "Server not running\n\n"
-            "Connect to the chamber in Live Monitoring, then click\n"
-            "Start Server to begin broadcasting its data."
-        ))
+        self._opc_info_lbl.setText(
+            self.tr(
+                "Server not running\n\n"
+                "Connect to the chamber in Live Monitoring, then click\n"
+                "Start Server to begin broadcasting its data."
+            )
+        )

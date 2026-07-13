@@ -1,25 +1,40 @@
 """Analysis tab page (RunTabPage) shown for each opened run, plus SimWorker."""
+
+import contextlib
 import csv
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import QSize, QThread, Signal
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
-    QHBoxLayout, QLabel, QLineEdit,
-    QMenu, QMessageBox, QPushButton, QScrollArea, QSpinBox,
-    QVBoxLayout, QWidget, QWidgetAction,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+    QWidgetAction,
 )
 
-from app.common import COLORS, RULE_COLOR_OPTIONS, fmt, csv_escape, _svg_icon
-from app.chart_widget import ChartWidget
-import app.services.data_service as data
 import app.services.annotations_service as annotations_service
+import app.services.data_service as data
 import app.services.settings_service as settings_service
+from app.chart_widget import ChartWidget
+from app.common import COLORS, RULE_COLOR_OPTIONS, _svg_icon, csv_escape, fmt
 
 
 class SimWorker(QThread):
     finished_ok = Signal(dict)
-    failed      = Signal(str)
+    failed = Signal(str)
 
     def __init__(self, payload):
         super().__init__()
@@ -37,20 +52,20 @@ class RunTabPage(QWidget):
 
     def __init__(self, run_key, all_runs, dark=True, current_user=None, parent=None):
         super().__init__(parent)
-        self.run_key          = run_key
-        self.all_runs         = all_runs
-        self.active_run       = run_key
-        self.detail           = None
-        self.series           = None
+        self.run_key = run_key
+        self.all_runs = all_runs
+        self.active_run = run_key
+        self.detail = None
+        self.series = None
         self.selected_columns = set()  # populated in load() from saved settings or defaults
-        self._channel_colors  = {}
-        self.compare_runs     = {run_key}
-        self.dark             = dark
-        self.current_user       = current_user or {"id": None, "name": "Unknown", "email": ""}
-        self._user_annotations  = []   # [{id, x0, x1, label, color, user_name, ...}] — persisted
-        self._ann_list_layout   = None
-        self._var_rules         = []   # [{id, name, channel, lo, hi, color, user_name, ...}] — persisted
-        self._rule_ch_combo     = None
+        self._channel_colors = {}
+        self.compare_runs = {run_key}
+        self.dark = dark
+        self.current_user = current_user or {"id": None, "name": "Unknown", "email": ""}
+        self._user_annotations = []  # [{id, x0, x1, label, color, user_name, ...}] — persisted
+        self._ann_list_layout = None
+        self._var_rules = []  # [{id, name, channel, lo, hi, color, user_name, ...}] — persisted
+        self._rule_ch_combo = None
         self._rules_list_layout = None
         self._build_ui()
 
@@ -125,8 +140,8 @@ class RunTabPage(QWidget):
         download.setObjectName("primaryButton")
         dl_menu = QMenu(download)
         for label, slot in [
-            (self.tr("Chart PNG"),      self.export_chart_png),
-            (self.tr("Run CSV"),        self.export_run_csv),
+            (self.tr("Chart PNG"), self.export_chart_png),
+            (self.tr("Run CSV"), self.export_run_csv),
             (self.tr("Comparison CSV"), self.export_comparison_csv),
         ]:
             act = QAction(label, dl_menu)
@@ -134,8 +149,15 @@ class RunTabPage(QWidget):
             dl_menu.addAction(act)
         download.setMenu(dl_menu)
 
-        for w in [self._ch_btn, self.show_setpoint, self.setpoint_value, reset_btn,
-                  self._ann_btn, self.chart_mode, download]:
+        for w in [
+            self._ch_btn,
+            self.show_setpoint,
+            self.setpoint_value,
+            reset_btn,
+            self._ann_btn,
+            self.chart_mode,
+            download,
+        ]:
             toolbar.addWidget(w)
 
         chart_card_lay.addLayout(toolbar)
@@ -172,8 +194,16 @@ class RunTabPage(QWidget):
         self.smoothing.setValue(1)
         self.smoothing.setSuffix(" pt")
         self.smoothing.valueChanged.connect(self._set_smoothing)
-        for w in [QLabel(self.tr("Start")), self.time_start, QLabel(self.tr("End")), self.time_end,
-                  apply_time, reset_time, QLabel(self.tr("Smooth")), self.smoothing]:
+        for w in [
+            QLabel(self.tr("Start")),
+            self.time_start,
+            QLabel(self.tr("End")),
+            self.time_end,
+            apply_time,
+            reset_time,
+            QLabel(self.tr("Smooth")),
+            self.smoothing,
+        ]:
             time_row.addWidget(w)
         time_row.addStretch(1)
         ctrl_lay.addLayout(time_row)
@@ -191,8 +221,8 @@ class RunTabPage(QWidget):
         ov_row.addWidget(QLabel(self.tr("Markers")))
         self.mk_events = QCheckBox(self.tr("Events"))
         self.mk_alarms = QCheckBox(self.tr("Alarms"))
-        self.mk_ctrl   = QCheckBox(self.tr("Controller"))
-        self.mk_state  = QCheckBox(self.tr("State"))
+        self.mk_ctrl = QCheckBox(self.tr("Controller"))
+        self.mk_state = QCheckBox(self.tr("State"))
         for cb in [self.mk_events, self.mk_alarms, self.mk_ctrl, self.mk_state]:
             cb.setChecked(True)
             cb.stateChanged.connect(self._update_markers)
@@ -248,7 +278,7 @@ class RunTabPage(QWidget):
         run = self.detail.get("run", {})
         self.title_label.setText(run.get("id", self.run_key))
         self._user_annotations = annotations_service.list_annotations(self.run_key)
-        self._var_rules        = annotations_service.list_rules(self.run_key)
+        self._var_rules = annotations_service.list_rules(self.run_key)
         self._render_summary()
         self._render_channels()
         self._refresh_annotations_list()
@@ -269,17 +299,26 @@ class RunTabPage(QWidget):
         self.dark = dark
         self.chart.set_dark(dark)
 
-    def primary_chart(self):  return self.chart
-    def _compare_mode(self):  return len(self.compare_runs) > 1
-    def _first_col(self):     return next(iter(self.selected_columns), None)
-    def _active_charts(self): return [self.chart]
+    def primary_chart(self):
+        return self.chart
+
+    def _compare_mode(self):
+        return len(self.compare_runs) > 1
+
+    def _first_col(self):
+        return next(iter(self.selected_columns), None)
+
+    def _active_charts(self):
+        return [self.chart]
 
     def _render_summary(self):
-        run     = (self.detail or {}).get("run", {})
+        run = (self.detail or {}).get("run", {})
         summary = (self.detail or {}).get("summary", {})
-        values  = {
-            "samples":  run.get("samples"),
-            "duration": f'{fmt(run.get("duration_s"), 1)} s' if run.get("duration_s") is not None else None,
+        values = {
+            "samples": run.get("samples"),
+            "duration": f"{fmt(run.get('duration_s'), 1)} s"
+            if run.get("duration_s") is not None
+            else None,
             "tail_mae": summary.get("tail_mae"),
         }
         for key, lbl in self.run_metric_labels.items():
@@ -303,16 +342,17 @@ class RunTabPage(QWidget):
         cols = (self.detail or {}).get("numeric_columns", [])
         n = len(self.selected_columns)
         self._ch_btn.setText(
-            self.tr("Channels ({0}/{1}) ▾").format(n, len(cols)) if cols else self.tr("Channels ▾"))
+            self.tr("Channels ({0}/{1}) ▾").format(n, len(cols)) if cols else self.tr("Channels ▾")
+        )
 
     def _open_channels_menu(self):
         if not self.detail:
             return
         menu = QMenu(self)
         for col in self.detail.get("numeric_columns", []):
-            wa  = QWidgetAction(menu)
+            wa = QWidgetAction(menu)
             row = QWidget()
-            rl  = QHBoxLayout(row)
+            rl = QHBoxLayout(row)
             rl.setContentsMargins(10, 4, 10, 4)
             rl.setSpacing(10)
 
@@ -322,9 +362,10 @@ class RunTabPage(QWidget):
 
             swatch = QPushButton()
             swatch.setFixedSize(16, 16)
-            color  = self._channel_colors.get(col, COLORS[0])
+            color = self._channel_colors.get(col, COLORS[0])
             swatch.setStyleSheet(
-                f"background:{color};border:1px solid rgba(255,255,255,0.25);border-radius:3px;")
+                f"background:{color};border:1px solid rgba(255,255,255,0.25);border-radius:3px;"
+            )
             swatch.clicked.connect(lambda _, c=col, m=menu: self._pick_channel_color(c, m))
 
             rl.addWidget(cb, 1)
@@ -332,8 +373,7 @@ class RunTabPage(QWidget):
             wa.setDefaultWidget(row)
             menu.addAction(wa)
 
-        menu.exec(self._ch_btn.mapToGlobal(
-            self._ch_btn.rect().bottomLeft()))
+        menu.exec(self._ch_btn.mapToGlobal(self._ch_btn.rect().bottomLeft()))
 
     def _set_channel_active(self, col, active):
         if active:
@@ -347,7 +387,7 @@ class RunTabPage(QWidget):
     def _pick_channel_color(self, col, menu):
         menu.close()
         current = QColor(self._channel_colors.get(col, COLORS[0]))
-        picked  = QColorDialog.getColor(current, self, self.tr("Color — {0}").format(col))
+        picked = QColorDialog.getColor(current, self, self.tr("Color — {0}").format(col))
         if picked.isValid():
             self._channel_colors[col] = picked.name()
             self.refresh_chart()
@@ -360,7 +400,7 @@ class RunTabPage(QWidget):
             return
         try:
             if self._compare_mode():
-                ch     = self._first_col()
+                ch = self._first_col()
                 series = []
                 for key in self.compare_runs:
                     payload = data.run_series(key, [ch])
@@ -377,14 +417,17 @@ class RunTabPage(QWidget):
     def refresh_chart(self):
         setpoint = None
         if self._compare_mode() and self.show_setpoint.isChecked():
-            try:
+            with contextlib.suppress(ValueError):
                 setpoint = float(self.setpoint_value.text())
-            except ValueError:
-                pass
         annotations = [] if self._compare_mode() else (self.detail or {}).get("annotations", [])
         for ch in self._active_charts():
-            ch.draw(self.series, self.chart_mode.currentText(), annotations, setpoint,
-                    colors=self._channel_colors)
+            ch.draw(
+                self.series,
+                self.chart_mode.currentText(),
+                annotations,
+                setpoint,
+                colors=self._channel_colors,
+            )
         self._draw_rules_on_chart()
         self._draw_user_annotations()
         self._update_time_controls()
@@ -421,16 +464,20 @@ class RunTabPage(QWidget):
 
     def _update_overlays(self):
         for ch in self._active_charts():
-            ch.set_overlay_flags(min=self.overlay_min.isChecked(),
-                                 max=self.overlay_max.isChecked(),
-                                 avg=self.overlay_avg.isChecked())
+            ch.set_overlay_flags(
+                min=self.overlay_min.isChecked(),
+                max=self.overlay_max.isChecked(),
+                avg=self.overlay_avg.isChecked(),
+            )
 
     def _update_markers(self):
         for ch in self._active_charts():
-            ch.set_marker_flags(events=self.mk_events.isChecked(),
-                                alarms=self.mk_alarms.isChecked(),
-                                controller=self.mk_ctrl.isChecked(),
-                                state=self.mk_state.isChecked())
+            ch.set_marker_flags(
+                events=self.mk_events.isChecked(),
+                alarms=self.mk_alarms.isChecked(),
+                controller=self.mk_ctrl.isChecked(),
+                state=self.mk_state.isChecked(),
+            )
 
     def _reset_views(self):
         for ch in self._active_charts():
@@ -447,7 +494,10 @@ class RunTabPage(QWidget):
             run_key=self.run_key,
             user_id=self.current_user.get("id"),
             user_name=self.current_user.get("name", "Unknown"),
-            x0=ann["x0"], x1=ann["x1"], label=ann["label"], color=ann["color"],
+            x0=ann["x0"],
+            x1=ann["x1"],
+            label=ann["label"],
+            color=ann["color"],
         )
         self._user_annotations.append(saved)
         self._ann_btn.setChecked(False)
@@ -475,10 +525,13 @@ class RunTabPage(QWidget):
             rlay.setContentsMargins(6, 3, 6, 3)
             rlay.setSpacing(10)
             swatch = QLabel("■")
-            swatch.setStyleSheet(f"color: {ann['color']}; background: transparent; font-size: 14px;")
+            swatch.setStyleSheet(
+                f"color: {ann['color']}; background: transparent; font-size: 14px;"
+            )
             desc = QLabel(
                 self.tr("<b>{0}</b>  ·  {1:.1f} – {2:.1f} s  ·  {3}").format(
-                    ann['label'], ann['x0'], ann['x1'], ann.get('user_name', 'Unknown'))
+                    ann["label"], ann["x0"], ann["x1"], ann.get("user_name", "Unknown")
+                )
             )
             desc.setStyleSheet("background: transparent;")
             del_btn = QPushButton("✕")
@@ -502,7 +555,9 @@ class RunTabPage(QWidget):
         lay.setSpacing(6)
         hdr = QHBoxLayout()
         hdr.addWidget(self._sec_lbl(self.tr("ANNOTATIONS")))
-        info = QLabel(self.tr("Click 'Annotate', then drag on the chart to mark a time range and label it."))
+        info = QLabel(
+            self.tr("Click 'Annotate', then drag on the chart to mark a time range and label it.")
+        )
         info.setObjectName("sectionLabel")
         info.setWordWrap(True)
         hdr.addWidget(info, 1)
@@ -525,7 +580,9 @@ class RunTabPage(QWidget):
 
         hdr = QHBoxLayout()
         hdr.addWidget(self._sec_lbl(self.tr("VARIABLE RULES")))
-        info = QLabel(self.tr("Highlight acceptable ranges on the Y-axis when the channel is plotted."))
+        info = QLabel(
+            self.tr("Highlight acceptable ranges on the Y-axis when the channel is plotted.")
+        )
         info.setObjectName("sectionLabel")
         info.setWordWrap(True)
         hdr.addWidget(info, 1)
@@ -552,9 +609,14 @@ class RunTabPage(QWidget):
         add_btn.setObjectName("primaryButton")
         add_btn.clicked.connect(self._add_var_rule)
 
-        for cap, w in [(self.tr("Channel"), self._rule_ch_combo), (self.tr("Min"), self._rule_lo_ed),
-                       (self.tr("Max"), self._rule_hi_ed),         (self.tr("Label"), self._rule_name_ed),
-                       (self.tr("Color"), self._rule_color_combo), ("", add_btn)]:
+        for cap, w in [
+            (self.tr("Channel"), self._rule_ch_combo),
+            (self.tr("Min"), self._rule_lo_ed),
+            (self.tr("Max"), self._rule_hi_ed),
+            (self.tr("Label"), self._rule_name_ed),
+            (self.tr("Color"), self._rule_color_combo),
+            ("", add_btn),
+        ]:
             if cap:
                 lbl = QLabel(cap)
                 lbl.setObjectName("sectionLabel")
@@ -602,7 +664,10 @@ class RunTabPage(QWidget):
             user_id=self.current_user.get("id"),
             user_name=self.current_user.get("name", "Unknown"),
             name=self._rule_name_ed.text().strip() or ch,
-            channel=ch, lo=lo, hi=hi, color=color,
+            channel=ch,
+            lo=lo,
+            hi=hi,
+            color=color,
         )
         self._var_rules.append(saved)
         self._rule_lo_ed.clear()
@@ -630,12 +695,15 @@ class RunTabPage(QWidget):
             rlay.setContentsMargins(6, 3, 6, 3)
             rlay.setSpacing(10)
             swatch = QLabel("■")
-            swatch.setStyleSheet(f"color: {rule['color']}; background: transparent; font-size: 14px;")
+            swatch.setStyleSheet(
+                f"color: {rule['color']}; background: transparent; font-size: 14px;"
+            )
             lo_str = f"{rule['lo']:g}" if rule["lo"] is not None else "−∞"
             hi_str = f"{rule['hi']:g}" if rule["hi"] is not None else "+∞"
             desc = QLabel(
                 self.tr("<b>{0}</b>  ·  {1}  [{2} , {3}]  ·  {4}").format(
-                    rule['name'], rule['channel'], lo_str, hi_str, rule.get('user_name', 'Unknown'))
+                    rule["name"], rule["channel"], lo_str, hi_str, rule.get("user_name", "Unknown")
+                )
             )
             desc.setStyleSheet("background: transparent;")
             del_btn = QPushButton("✕")
@@ -651,16 +719,20 @@ class RunTabPage(QWidget):
         for rule in self._var_rules:
             if rule["channel"] not in self.selected_columns:
                 continue
-            lo    = rule.get("lo")
-            hi    = rule.get("hi")
+            lo = rule.get("lo")
+            hi = rule.get("hi")
             color = rule.get("color", "#60a5fa")
-            name  = rule.get("name", "")
+            name = rule.get("name", "")
             if lo is not None and hi is not None:
                 self.chart.add_range_band(lo, hi, color, name)
             elif lo is not None:
-                self.chart.add_horizontal_marker(lo, self.tr("{0} min").format(name), color, overlay=True)
+                self.chart.add_horizontal_marker(
+                    lo, self.tr("{0} min").format(name), color, overlay=True
+                )
             elif hi is not None:
-                self.chart.add_horizontal_marker(hi, self.tr("{0} max").format(name), color, overlay=True)
+                self.chart.add_horizontal_marker(
+                    hi, self.tr("{0} max").format(name), color, overlay=True
+                )
 
     # ── Exports ──────────────────────────────────────────────────────────────
 
@@ -668,7 +740,8 @@ class RunTabPage(QWidget):
         if not self.detail:
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Save chart"), f"{self.detail['run']['id']}.png", self.tr("PNG (*.png)"))
+            self, self.tr("Save chart"), f"{self.detail['run']['id']}.png", self.tr("PNG (*.png)")
+        )
         if path:
             self.chart.export_view(path)
 
@@ -677,8 +750,11 @@ class RunTabPage(QWidget):
             return
         table = data.run_table(self.run_key)
         path, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Save run CSV"),
-            f"{self.detail['run']['id']}-samples.csv", self.tr("CSV (*.csv)"))
+            self,
+            self.tr("Save run CSV"),
+            f"{self.detail['run']['id']}-samples.csv",
+            self.tr("CSV (*.csv)"),
+        )
         if path:
             with open(path, "w", newline="", encoding="utf-8") as fh:
                 writer = csv.DictWriter(fh, fieldnames=table["columns"])
@@ -687,12 +763,16 @@ class RunTabPage(QWidget):
 
     def export_comparison_csv(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, self.tr("Save comparison CSV"), "deepvac-comparison.csv", self.tr("CSV (*.csv)"))
+            self, self.tr("Save comparison CSV"), "deepvac-comparison.csv", self.tr("CSV (*.csv)")
+        )
         if not path:
             return
-        rows  = [r for r in self.all_runs if r["key"] in (self.compare_runs or {self.run_key})]
+        rows = [r for r in self.all_runs if r["key"] in (self.compare_runs or {self.run_key})]
         lines = ["Run,Cost,MAE,Tail MAE,Overshoot"]
         for r in rows:
-            lines.append(",".join(csv_escape(r[k]) for k in ["id", "cost", "mae", "tail_mae", "overshoot"]))
+            lines.append(
+                ",".join(csv_escape(r[k]) for k in ["id", "cost", "mae", "tail_mae", "overshoot"])
+            )
         from pathlib import Path as _Path
+
         _Path(path).write_text("\n".join(lines), encoding="utf-8")

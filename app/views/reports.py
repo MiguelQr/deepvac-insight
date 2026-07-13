@@ -1,16 +1,26 @@
 """ReportsMixin — builds the Reports page and handles report generation."""
+
 from datetime import datetime
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import QUrl
 
-from app.common import REPORTS_DIR, fmt, _svg_icon
 import app.services.data_service as data
+from app.common import REPORTS_DIR, _svg_icon, fmt
 
 
 def _safe_report_filename(run_id):
@@ -20,7 +30,7 @@ def _safe_report_filename(run_id):
 
 class ReportsMixin:
     def _reports_view(self):
-        self._report_rows         = []
+        self._report_rows = []
         self._report_selected_key = None
 
         container = QWidget()
@@ -42,8 +52,7 @@ class ReportsMixin:
         self._report_search = QLineEdit()
         self._report_search.setObjectName("searchBox")
         self._report_search.setPlaceholderText(self.tr("Search run id…"))
-        self._report_search.addAction(
-            _svg_icon("search", "#64748b", 13), QLineEdit.LeadingPosition)
+        self._report_search.addAction(_svg_icon("search", "#64748b", 13), QLineEdit.LeadingPosition)
         self._report_search.textChanged.connect(self._refresh_reports)
         top_row.addWidget(self._report_search, 1)
 
@@ -89,15 +98,16 @@ class ReportsMixin:
         self._report_preview_label = QLabel(self.tr("Select a run to see\nreport details."))
         self._report_preview_label.setWordWrap(True)
         self._report_preview_label.setStyleSheet(
-            "color: #94a3b8; font-size: 10pt; background: transparent;")
+            "color: #94a3b8; font-size: 10pt; background: transparent;"
+        )
         pv_lay.addWidget(self._report_preview_label)
         pv_lay.addStretch(1)
         self._report_open_btn = QPushButton(self.tr("Open"))
         self._report_open_btn.setObjectName("primaryButton")
         self._report_open_btn.clicked.connect(self._report_action_open)
-        self._report_gen_btn  = QPushButton(self.tr("Generate / Regenerate"))
+        self._report_gen_btn = QPushButton(self.tr("Generate / Regenerate"))
         self._report_gen_btn.clicked.connect(self._report_action_generate)
-        self._report_del_btn  = QPushButton(self.tr("Delete Report"))
+        self._report_del_btn = QPushButton(self.tr("Delete Report"))
         self._report_del_btn.clicked.connect(self._report_action_delete)
         for b in [self._report_open_btn, self._report_gen_btn, self._report_del_btn]:
             b.setEnabled(False)
@@ -108,26 +118,28 @@ class ReportsMixin:
         return container
 
     def _refresh_reports(self):
-        reports_dir   = REPORTS_DIR
-        query         = (self._report_search.text().lower().strip()
-                         if hasattr(self, "_report_search") else "")
-        status_filter = (self._report_status_filter.currentData()
-                         if hasattr(self, "_report_status_filter") else "All")
+        reports_dir = REPORTS_DIR
+        query = (
+            self._report_search.text().lower().strip() if hasattr(self, "_report_search") else ""
+        )
+        status_filter = (
+            self._report_status_filter.currentData()
+            if hasattr(self, "_report_status_filter")
+            else "All"
+        )
 
         all_rows = []
-        counts   = {"Ready": 0, "Missing": 0}
+        counts = {"Ready": 0, "Missing": 0}
         for run in self.runs:
             path = reports_dir / f"{_safe_report_filename(run['id'])}.xlsx"
             if path.exists():
-                status    = "Ready"
-                generated = datetime.fromtimestamp(
-                    path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+                status = "Ready"
+                generated = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             else:
-                status    = "Missing"
+                status = "Missing"
                 generated = self.tr("Never")
             counts[status] = counts.get(status, 0) + 1
-            all_rows.append({"run": run, "status": status,
-                             "generated": generated, "path": path})
+            all_rows.append({"run": run, "status": status, "generated": generated, "path": path})
 
         self._report_rows = all_rows
         self._refresh_report_stats(counts)
@@ -138,8 +150,13 @@ class ReportsMixin:
         if status_filter != "All":
             rows = [r for r in rows if r["status"] == status_filter]
 
-        cols  = [self.tr("Run ID"), self.tr("Status"), self.tr("Samples"),
-                 self.tr("Duration"), self.tr("Last Generated")]
+        cols = [
+            self.tr("Run ID"),
+            self.tr("Status"),
+            self.tr("Samples"),
+            self.tr("Duration"),
+            self.tr("Last Generated"),
+        ]
         status_labels = {"Ready": self.tr("Ready"), "Missing": self.tr("Missing")}
         table = self._report_table
         table.setUpdatesEnabled(False)
@@ -153,12 +170,19 @@ class ReportsMixin:
         table.setHorizontalHeaderLabels(cols)
         for ri, r in enumerate(rows):
             run = r["run"]
-            dur = (self.tr("{0} s").format(fmt(run.get("duration_s"), 1))
-                   if run.get("duration_s") is not None else "-")
+            dur = (
+                self.tr("{0} s").format(fmt(run.get("duration_s"), 1))
+                if run.get("duration_s") is not None
+                else "-"
+            )
             samples = run.get("samples")
-            values = [run["id"], status_labels.get(r["status"], r["status"]),
-                      samples if samples is not None else "-",
-                      dur, r["generated"]]
+            values = [
+                run["id"],
+                status_labels.get(r["status"], r["status"]),
+                samples if samples is not None else "-",
+                dur,
+                r["generated"],
+            ]
             for ci, v in enumerate(values):
                 item = QTableWidgetItem(str(v))
                 item.setData(Qt.UserRole, run["key"])
@@ -171,17 +195,17 @@ class ReportsMixin:
     def _refresh_report_stats(self, counts):
         while self._report_stats_row.count():
             item = self._report_stats_row.takeAt(0)
-            w    = item.widget()
+            w = item.widget()
             if w:
                 w.deleteLater()
         for lbl, val in [
             (self.tr("Total Runs"), str(len(self.runs))),
-            (self.tr("Ready"),      str(counts.get("Ready",   0))),
-            (self.tr("Missing"),    str(counts.get("Missing", 0))),
+            (self.tr("Ready"), str(counts.get("Ready", 0))),
+            (self.tr("Missing"), str(counts.get("Missing", 0))),
         ]:
             box = QFrame()
             box.setObjectName("card")
-            bl  = QVBoxLayout(box)
+            bl = QVBoxLayout(box)
             bl.setContentsMargins(16, 10, 16, 10)
             bl.setSpacing(4)
             cap = QLabel(lbl)
@@ -199,22 +223,26 @@ class ReportsMixin:
             for b in [self._report_open_btn, self._report_gen_btn, self._report_del_btn]:
                 b.setEnabled(False)
             return
-        key  = items[0].data(Qt.UserRole)
+        key = items[0].data(Qt.UserRole)
         self._report_selected_key = key
-        row  = next((r for r in self._report_rows if r["run"]["key"] == key), None)
+        row = next((r for r in self._report_rows if r["run"]["key"] == key), None)
         if not row:
             return
-        run    = row["run"]
-        path   = row["path"]
+        run = row["run"]
+        path = row["path"]
         exists = path.exists()
         size_str = f"{path.stat().st_size / 1024:.1f} KB" if exists else "-"
         status_labels = {"Ready": self.tr("Ready"), "Missing": self.tr("Missing")}
         self._report_preview_label.setText(
-            self.tr("Run: {0}").format(run['id']) + "\n\n" +
-            self.tr("Status: {0}").format(status_labels.get(row['status'], row['status'])) + "\n" +
-            self.tr("Generated: {0}").format(row['generated']) + "\n" +
-            self.tr("File: {0}").format(path.name if exists else self.tr("(not generated)")) + "\n" +
-            self.tr("Size: {0}").format(size_str)
+            self.tr("Run: {0}").format(run["id"])
+            + "\n\n"
+            + self.tr("Status: {0}").format(status_labels.get(row["status"], row["status"]))
+            + "\n"
+            + self.tr("Generated: {0}").format(row["generated"])
+            + "\n"
+            + self.tr("File: {0}").format(path.name if exists else self.tr("(not generated)"))
+            + "\n"
+            + self.tr("Size: {0}").format(size_str)
         )
         self._report_open_btn.setEnabled(exists)
         self._report_gen_btn.setEnabled(True)
@@ -234,8 +262,9 @@ class ReportsMixin:
     def _report_action_open(self):
         if not self._report_selected_key:
             return
-        row = next((r for r in self._report_rows
-                    if r["run"]["key"] == self._report_selected_key), None)
+        row = next(
+            (r for r in self._report_rows if r["run"]["key"] == self._report_selected_key), None
+        )
         if row and row["path"].exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(row["path"])))
 

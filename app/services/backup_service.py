@@ -9,9 +9,11 @@ bytes directly which can grab a half-written page.
 Runs at most once per calendar day per database unless force=True, and
 prunes old backups beyond a retention count so this can't grow unbounded.
 """
+
 import shutil
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.common import DATA_DIR
 
@@ -49,7 +51,7 @@ def backup_database(source_path, reason="startup"):
 def _prune(dest_dir, keep=MAX_BACKUPS_PER_DB):
     backups = sorted(dest_dir.glob("*.sqlite3"), key=lambda p: p.stat().st_mtime)
     excess = len(backups) - keep
-    for old in backups[:max(0, excess)]:
+    for old in backups[: max(0, excess)]:
         old.unlink(missing_ok=True)
 
 
@@ -61,8 +63,12 @@ def backup_all(force=False):
     stamp = _today_stamp()
     for source_path in _source_databases():
         dest_dir = BACKUPS_DIR / source_path.stem
-        already_today = not force and dest_dir.exists() and any(
-            p.name.startswith(f"{source_path.stem}_{stamp}") for p in dest_dir.glob("*.sqlite3")
+        already_today = (
+            not force
+            and dest_dir.exists()
+            and any(
+                p.name.startswith(f"{source_path.stem}_{stamp}") for p in dest_dir.glob("*.sqlite3")
+            )
         )
         if already_today:
             continue
@@ -77,7 +83,7 @@ def backup_all(force=False):
 
 def list_backups():
     """Return {db_stem: [backup Paths, oldest first]} for display/restore."""
-    out = {}
+    out: dict[str, list[Path]] = {}
     if not BACKUPS_DIR.exists():
         return out
     for sub in sorted(BACKUPS_DIR.iterdir()):

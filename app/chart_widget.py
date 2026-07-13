@@ -1,12 +1,20 @@
 """Chart infrastructure: CrosshairSyncHub, BoxZoomViewBox, ChartWidget."""
+
+import contextlib
+
 import numpy as np
 import pyqtgraph as pg
-
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.common import COLORS, RULE_COLOR_OPTIONS, fmt
@@ -59,7 +67,7 @@ class CrosshairSyncHub:
 
 
 class BoxZoomViewBox(pg.ViewBox):
-    annotate_drag    = Signal(float, float)  # final commit: x0, x1
+    annotate_drag = Signal(float, float)  # final commit: x0, x1
     annotate_preview = Signal(float, float)  # live during drag: x0, x1
 
     def __init__(self):
@@ -139,23 +147,30 @@ class ChartWidget(QWidget):
         self.plot.getViewBox().setMouseMode(pg.ViewBox.PanMode)
 
         self.crosshair_v = pg.InfiniteLine(
-            angle=90, movable=False, pen=pg.mkPen("#94a3b8", width=1, style=Qt.DashLine))
+            angle=90, movable=False, pen=pg.mkPen("#94a3b8", width=1, style=Qt.DashLine)
+        )
         self.crosshair_h = pg.InfiniteLine(
-            angle=0,  movable=False, pen=pg.mkPen("#94a3b8", width=1, style=Qt.DashLine))
+            angle=0, movable=False, pen=pg.mkPen("#94a3b8", width=1, style=Qt.DashLine)
+        )
         self.crosshair_v.setVisible(False)
         self.crosshair_h.setVisible(False)
         self.plot.addItem(self.crosshair_v, ignoreBounds=True)
         self.plot.addItem(self.crosshair_h, ignoreBounds=True)
 
         self.hover_label = pg.TextItem(
-            "", anchor=(0, 1), color="#f8fafc",
-            fill=pg.mkBrush(17, 24, 39, 235), border=pg.mkPen("#60a5fa"))
+            "",
+            anchor=(0, 1),
+            color="#f8fafc",
+            fill=pg.mkBrush(17, 24, 39, 235),
+            border=pg.mkPen("#60a5fa"),
+        )
         self.hover_label.setVisible(False)
         self.plot.addItem(self.hover_label, ignoreBounds=True)
         self.plot.scene().sigMouseMoved.connect(self.on_mouse_moved)
 
         self.region = pg.LinearRegionItem(
-            brush=pg.mkBrush(96, 165, 250, 38), pen=pg.mkPen("#60a5fa"))
+            brush=pg.mkBrush(96, 165, 250, 38), pen=pg.mkPen("#60a5fa")
+        )
         self.region.setZValue(-10)
         self.region.setVisible(False)
         self.region.sigRegionChanged.connect(self.apply_time_region)
@@ -208,7 +223,8 @@ class ChartWidget(QWidget):
             pen = pg.mkPen(color, width=1.8)
             symbol = "o" if mode == "scatter" else None
             curve = self.plot.plot(
-                xs, ys,
+                xs,
+                ys,
                 pen=None if mode == "scatter" else pen,
                 symbol=symbol,
                 symbolSize=6 if mode == "scatter" else None,
@@ -218,27 +234,25 @@ class ChartWidget(QWidget):
             self.curves.append(curve)
             self.hover_points.extend(
                 {"x": float(x), "y": float(y), "label": dataset["label"], "color": color}
-                for x, y in zip(xs, ys)
+                for x, y in zip(xs, ys, strict=False)
             )
         self.draw_annotations()
         self.draw_overlays()
         if setpoint is not None:
             self.add_horizontal_marker(
-                setpoint, self.tr("Setpoint {0}").format(fmt(setpoint, 2)), "#94a3b8")
+                setpoint, self.tr("Setpoint {0}").format(fmt(setpoint, 2)), "#94a3b8"
+            )
         if self.auto_range_on_draw:
             self.plot.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
             self.plot.autoRange()
             self.auto_range_on_draw = False
         else:
-            self.plot.getViewBox().setRange(
-                xRange=view_range[0], yRange=view_range[1], padding=0)
+            self.plot.getViewBox().setRange(xRange=view_range[0], yRange=view_range[1], padding=0)
 
     def clear_plot_items(self):
         for item in self.curves + self.marker_items + self.overlay_items:
-            try:
+            with contextlib.suppress(Exception):
                 self.plot.removeItem(item)
-            except Exception:
-                pass
         self.curves = []
         self.marker_items = []
         self.overlay_items = []
@@ -303,8 +317,12 @@ class ChartWidget(QWidget):
             return []
         if payload.get("series"):
             return [
-                {"label": item["label"],
-                 "points": self._normalize_points(item.get("points", []), payload.get("channel"))}
+                {
+                    "label": item["label"],
+                    "points": self._normalize_points(
+                        item.get("points", []), payload.get("channel")
+                    ),
+                }
                 for item in payload["series"]
             ]
         return [
@@ -334,7 +352,7 @@ class ChartWidget(QWidget):
         ys = np.array([p[1] for p in points], dtype=float)
         kernel = np.ones(self.smoothing_window, dtype=float) / self.smoothing_window
         smoothed = np.convolve(ys, kernel, mode="same")
-        return list(zip(xs.tolist(), smoothed.tolist()))
+        return list(zip(xs.tolist(), smoothed.tolist(), strict=False))
 
     def draw_overlays(self):
         all_points = [p for ds in self.datasets for p in self.apply_smoothing(ds["points"])]
@@ -343,21 +361,37 @@ class ChartWidget(QWidget):
         ys = np.array([p[1] for p in all_points], dtype=float)
         if self.overlay_flags.get("min"):
             self.add_horizontal_marker(
-                float(np.min(ys)), self.tr("Min {0}").format(fmt(np.min(ys), 3)), "#51d6c7", overlay=True)
+                float(np.min(ys)),
+                self.tr("Min {0}").format(fmt(np.min(ys), 3)),
+                "#51d6c7",
+                overlay=True,
+            )
         if self.overlay_flags.get("max"):
             self.add_horizontal_marker(
-                float(np.max(ys)), self.tr("Max {0}").format(fmt(np.max(ys), 3)), "#ff6f7d", overlay=True)
+                float(np.max(ys)),
+                self.tr("Max {0}").format(fmt(np.max(ys), 3)),
+                "#ff6f7d",
+                overlay=True,
+            )
         if self.overlay_flags.get("avg"):
             self.add_horizontal_marker(
-                float(np.mean(ys)), self.tr("Avg {0}").format(fmt(np.mean(ys), 3)), "#f2bd52", overlay=True)
+                float(np.mean(ys)),
+                self.tr("Avg {0}").format(fmt(np.mean(ys), 3)),
+                "#f2bd52",
+                overlay=True,
+            )
 
     def draw_annotations(self):
         for ann in self.annotations:
             cat = self._marker_category(ann)
             if not self.marker_flags.get(cat, True):
                 continue
-            color = {"events": "#8bd66f", "alarms": "#ff6f7d",
-                     "controller": "#f2bd52", "state": "#b792ff"}.get(cat, "#94a3b8")
+            color = {
+                "events": "#8bd66f",
+                "alarms": "#ff6f7d",
+                "controller": "#f2bd52",
+                "state": "#b792ff",
+            }.get(cat, "#94a3b8")
             atype = ann.get("type")
             if atype == "line-x":
                 self.add_vertical_marker(ann.get("x"), ann.get("label", self.tr("Marker")), color)
@@ -365,15 +399,22 @@ class ChartWidget(QWidget):
                 self.add_horizontal_marker(ann.get("y"), ann.get("label", self.tr("Marker")), color)
             elif atype == "point":
                 item = pg.ScatterPlotItem(
-                    [ann.get("x")], [ann.get("y")], size=9,
-                    brush=pg.mkBrush(color), pen=pg.mkPen("#111827", width=1),
-                    name=ann.get("label", self.tr("Event")))
+                    [ann.get("x")],
+                    [ann.get("y")],
+                    size=9,
+                    brush=pg.mkBrush(color),
+                    pen=pg.mkPen("#111827", width=1),
+                    name=ann.get("label", self.tr("Event")),
+                )
                 self.plot.addItem(item)
                 self.marker_items.append(item)
             elif atype == "region-x":
                 region = pg.LinearRegionItem(
-                    values=(ann.get("x0"), ann.get("x1")), movable=False,
-                    brush=pg.mkBrush(color + "33"), pen=pg.mkPen(color, width=1))
+                    values=(ann.get("x0"), ann.get("x1")),
+                    movable=False,
+                    brush=pg.mkBrush(color + "33"),
+                    pen=pg.mkPen(color, width=1),
+                )
                 region.setZValue(-20)
                 self.plot.addItem(region)
                 self.marker_items.append(region)
@@ -392,8 +433,12 @@ class ChartWidget(QWidget):
         if x is None:
             return
         line = pg.InfiniteLine(
-            pos=float(x), angle=90, movable=False,
-            pen=pg.mkPen(color, width=1.1, style=Qt.DashLine), label=label)
+            pos=float(x),
+            angle=90,
+            movable=False,
+            pen=pg.mkPen(color, width=1.1, style=Qt.DashLine),
+            label=label,
+        )
         self.plot.addItem(line)
         self.marker_items.append(line)
 
@@ -401,8 +446,12 @@ class ChartWidget(QWidget):
         if y is None:
             return
         line = pg.InfiniteLine(
-            pos=float(y), angle=0, movable=False,
-            pen=pg.mkPen(color, width=1.1, style=Qt.DashLine), label=label)
+            pos=float(y),
+            angle=0,
+            movable=False,
+            pen=pg.mkPen(color, width=1.1, style=Qt.DashLine),
+            label=label,
+        )
         self.plot.addItem(line)
         (self.overlay_items if overlay else self.marker_items).append(line)
 
@@ -437,7 +486,9 @@ class ChartWidget(QWidget):
         self.overlay_items.append(region)
         if label:
             line = pg.InfiniteLine(
-                pos=float(x0), angle=90, movable=False,
+                pos=float(x0),
+                angle=90,
+                movable=False,
                 pen=pg.mkPen(color, width=1, style=Qt.DashLine),
                 label=label,
                 labelOpts={"color": color, "position": 0.95, "anchors": [(0, 0), (0, 0)]},
@@ -519,9 +570,12 @@ class ChartWidget(QWidget):
             self.hover_label.setVisible(False)
             return
         self.hover_label.setText(
-            best['label'] + "\n" +
-            self.tr("Time: {0} s").format(fmt(best['x'], 1)) + "\n" +
-            self.tr("Value: {0}").format(fmt(best['y'], 3)))
+            best["label"]
+            + "\n"
+            + self.tr("Time: {0} s").format(fmt(best["x"], 1))
+            + "\n"
+            + self.tr("Value: {0}").format(fmt(best["y"], 3))
+        )
         self.hover_label.setColor(best["color"])
         self.hover_label.setPos(best["x"], best["y"])
         self.hover_label.setVisible(True)
@@ -536,9 +590,12 @@ class ChartWidget(QWidget):
             vr = self.plot.getViewBox().viewRange()[0]
             if abs(best["x"] - x) <= (vr[1] - vr[0]) * 0.04:
                 self.hover_label.setText(
-                    best['label'] + "\n" +
-            self.tr("Time: {0} s").format(fmt(best['x'], 1)) + "\n" +
-            self.tr("Value: {0}").format(fmt(best['y'], 3)))
+                    best["label"]
+                    + "\n"
+                    + self.tr("Time: {0} s").format(fmt(best["x"], 1))
+                    + "\n"
+                    + self.tr("Value: {0}").format(fmt(best["y"], 3))
+                )
                 self.hover_label.setColor(best["color"])
                 self.hover_label.setPos(best["x"], best["y"])
                 self.hover_label.setVisible(True)
@@ -555,8 +612,7 @@ class ChartWidget(QWidget):
         best_dist = float("inf")
         for p in self.hover_points:
             pixel = self.plot.plotItem.vb.mapViewToScene(pg.Point(p["x"], p["y"]))
-            dist = ((pixel.x() - scene_pos.x()) ** 2 +
-                    (pixel.y() - scene_pos.y()) ** 2) ** 0.5
+            dist = ((pixel.x() - scene_pos.x()) ** 2 + (pixel.y() - scene_pos.y()) ** 2) ** 0.5
             if dist < best_dist:
                 best = p
                 best_dist = dist

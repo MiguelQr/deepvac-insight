@@ -11,6 +11,7 @@ satisfies "broadcast the values read from the chamber to external clients"
 without OPC UA protocol compliance. Swap in a real asyncua server here if
 protocol compliance is required later.
 """
+
 import json
 
 from PySide6.QtCore import QObject, Signal
@@ -18,10 +19,10 @@ from PySide6.QtNetwork import QHostAddress, QTcpServer
 
 
 class OpcBroadcastServer(QObject):
-    started               = Signal(int)   # port
-    stopped                = Signal()
-    client_count_changed   = Signal(int)
-    server_error            = Signal(str)
+    started = Signal(int)  # port
+    stopped = Signal()
+    client_count_changed = Signal(int)
+    server_error = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)

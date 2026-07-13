@@ -1,6 +1,7 @@
 """User accounts: creation, authentication, profile updates, and
 remember-me session tokens. Stored in their own local SQLite database,
 separate from the run-data cache."""
+
 import hashlib
 import hmac
 import os
@@ -107,8 +108,8 @@ def create_user(name, email, password):
                 """,
                 (name, email, password_hash, salt, now, now),
             )
-        except sqlite3.IntegrityError:
-            raise AuthError(_tr("An account with this email already exists."))
+        except sqlite3.IntegrityError as exc:
+            raise AuthError(_tr("An account with this email already exists.")) from exc
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _row_to_user(row)
@@ -162,9 +163,7 @@ def set_remember_token(user_id):
 def clear_remember_token(token):
     conn = connect_auth()
     try:
-        conn.execute(
-            "UPDATE users SET remember_token = NULL WHERE remember_token = ?", (token,)
-        )
+        conn.execute("UPDATE users SET remember_token = NULL WHERE remember_token = ?", (token,))
         conn.commit()
     finally:
         conn.close()
@@ -186,8 +185,8 @@ def update_profile(user_id, name=None, email=None):
                 "UPDATE users SET name = ?, email = ?, updated_at = ? WHERE id = ?",
                 (new_name, new_email, _now(), user_id),
             )
-        except sqlite3.IntegrityError:
-            raise AuthError(_tr("An account with this email already exists."))
+        except sqlite3.IntegrityError as exc:
+            raise AuthError(_tr("An account with this email already exists.")) from exc
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return _row_to_user(row)

@@ -1,9 +1,17 @@
 """LoginWindow — sign in / create account screen shown before the main window."""
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication,
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from app.common import ICON_PATH, LOGO_PATH
@@ -189,6 +197,7 @@ class LoginWindow(QWidget):
 
     def _remember(self, user):
         from PySide6.QtCore import QSettings
+
         token = auth_service.set_remember_token(user["id"])
         QSettings("DeepVac", "Insight").setValue("auth/remember_token", token)
 

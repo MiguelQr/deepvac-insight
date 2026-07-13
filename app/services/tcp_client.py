@@ -11,6 +11,7 @@ event loop, so no extra thread or manual synchronization is needed here.
 See tcp/dummy_chamber_server.py (gitignored, a local dev/test tool, not
 part of the shipped app) for a server that speaks this same protocol.
 """
+
 import json
 
 from PySide6.QtCore import QObject, Signal
@@ -18,10 +19,10 @@ from PySide6.QtNetwork import QAbstractSocket, QTcpSocket
 
 
 class ChamberConnection(QObject):
-    connected        = Signal()
-    disconnected     = Signal()
+    connected = Signal()
+    disconnected = Signal()
     connection_error = Signal(str)
-    sample_received  = Signal(dict)
+    sample_received = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)

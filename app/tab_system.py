@@ -1,21 +1,30 @@
 """Tab bar, editor groups, and the split-pane editor area."""
+
 import json
 
 from PySide6.QtCore import QByteArray, QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QSplitter, QStackedWidget, QVBoxLayout, QWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
-from app.common import _TAB_MIME, _new_gid, _svg_icon
 from app.chart_widget import CrosshairSyncHub
+from app.common import _TAB_MIME, _new_gid, _svg_icon
 
 
 class TabBar(QWidget):
-    tab_activated          = Signal(int)
-    tab_closed             = Signal(int)
-    split_right_requested  = Signal(int)
+    tab_activated = Signal(int)
+    tab_closed = Signal(int)
+    split_right_requested = Signal(int)
     move_to_group_requested = Signal(int, int)  # tab_index, group_id
 
     def __init__(self, parent=None):
@@ -23,9 +32,9 @@ class TabBar(QWidget):
         self.setObjectName("tabBar")
         self.setFixedHeight(35)
         self._entries = []
-        self._active  = -1
+        self._active = -1
         self._drag_start = None
-        self._drag_idx   = -1
+        self._drag_idx = -1
         self.get_other_groups = None  # injected by EditorGroup
 
         outer = QHBoxLayout(self)
@@ -91,10 +100,10 @@ class TabBar(QWidget):
         lay.addWidget(lbl, 1)
         lay.addWidget(btn)
 
-        frame.mousePressEvent   = lambda e, k=key: self._press(e, k)
-        frame.mouseMoveEvent    = lambda e, k=key: self._move(e, k)
+        frame.mousePressEvent = lambda e, k=key: self._press(e, k)
+        frame.mouseMoveEvent = lambda e, k=key: self._move(e, k)
         frame.mouseReleaseEvent = lambda _ev: setattr(self, "_drag_start", None)
-        frame.contextMenuEvent  = lambda e, k=key: self._ctx(e, k)
+        frame.contextMenuEvent = lambda e, k=key: self._ctx(e, k)
         return frame
 
     def _idx(self, key):
@@ -109,7 +118,7 @@ class TabBar(QWidget):
             self._set_active(i)
             self.tab_activated.emit(i)
             self._drag_start = event.globalPosition().toPoint()
-            self._drag_idx   = i
+            self._drag_idx = i
 
     def _move(self, event, key):
         if self._drag_start is None:
@@ -138,9 +147,9 @@ class TabBar(QWidget):
 
     def _ctx(self, event, key):
         i = self._idx(key)
-        menu   = QMenu(self)
-        a_sr   = menu.addAction(self.tr("Split Right"))
-        moves  = []
+        menu = QMenu(self)
+        a_sr = menu.addAction(self.tr("Split Right"))
+        moves = []
         if callable(self.get_other_groups):
             others = self.get_other_groups()
             if others:
@@ -149,7 +158,7 @@ class TabBar(QWidget):
                     act = menu.addAction(self.tr("Move to Pane {0}").format(g.group_id))
                     moves.append((act, g.group_id))
         menu.addSeparator()
-        a_cl   = menu.addAction(self.tr("Close"))
+        a_cl = menu.addAction(self.tr("Close"))
         chosen = menu.exec(event.globalPos())
         if chosen == a_sr:
             self.split_right_requested.emit(i)
@@ -187,33 +196,36 @@ class TabBar(QWidget):
             e["frame"].style().unpolish(e["frame"])
             e["frame"].style().polish(e["frame"])
 
-    def active_index(self): return self._active
+    def active_index(self):
+        return self._active
 
     def active_key(self):
         if 0 <= self._active < len(self._entries):
             return self._entries[self._active]["key"]
         return None
 
-    def count(self): return len(self._entries)
+    def count(self):
+        return len(self._entries)
 
     def key_at(self, index):
         if 0 <= index < len(self._entries):
             return self._entries[index]["key"]
         return None
 
-    def all_keys(self): return [e["key"] for e in self._entries]
+    def all_keys(self):
+        return [e["key"] for e in self._entries]
 
 
 class EditorGroup(QWidget):
-    active_changed   = Signal(object)          # RunTabPage or None
-    split_requested  = Signal(object, str, str) # self, direction, key
-    group_empty      = Signal(object)           # self
-    tab_received     = Signal(object, str, str) # self, key, id (from drop)
+    active_changed = Signal(object)  # RunTabPage or None
+    split_requested = Signal(object, str, str)  # self, direction, key
+    group_empty = Signal(object)  # self
+    tab_received = Signal(object, str, str)  # self, key, id (from drop)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.group_id = _new_gid()
-        self._pages   = {}   # key -> RunTabPage
+        self._pages = {}  # key -> RunTabPage
         self.setAcceptDrops(True)
         self.setMinimumSize(300, 300)
 
@@ -287,8 +299,11 @@ class EditorGroup(QWidget):
         key = self.tab_bar.active_key()
         return self._pages.get(key)
 
-    def has_key(self, key):   return key in self._pages
-    def all_keys(self):       return list(self._pages.keys())
+    def has_key(self, key):
+        return key in self._pages
+
+    def all_keys(self):
+        return list(self._pages.keys())
 
     def _on_activated(self, index):
         key = self.tab_bar.key_at(index)
@@ -323,7 +338,7 @@ class EditorGroup(QWidget):
         self._drop_bar.setVisible(False)
         if not event.mimeData().hasFormat(_TAB_MIME):
             return
-        raw  = bytes(event.mimeData().data(_TAB_MIME))
+        raw = bytes(event.mimeData().data(_TAB_MIME))
         info = json.loads(raw.decode())
         self.tab_received.emit(self, info["key"], info["id"])
         event.acceptProposedAction()
@@ -335,10 +350,10 @@ class EditorArea(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("editorArea")
-        self._groups       = []
-        self._pages        = {}   # key -> (RunTabPage, EditorGroup)
+        self._groups = []
+        self._pages = {}  # key -> (RunTabPage, EditorGroup)
         self._active_group = None
-        self._sync_hub     = CrosshairSyncHub()
+        self._sync_hub = CrosshairSyncHub()
 
         self._root_splitter = QSplitter(Qt.Horizontal)
         self._root_splitter.setHandleWidth(4)
@@ -404,7 +419,8 @@ class EditorArea(QWidget):
             return self._active_group.active_page()
         return None
 
-    def all_groups(self): return list(self._groups)
+    def all_groups(self):
+        return list(self._groups)
 
     def rename_open_run(self, key, run_id):
         if key not in self._pages:
@@ -476,8 +492,9 @@ class EditorArea(QWidget):
         parent = group.parent()
         if isinstance(parent, QSplitter):
             if parent.count() <= 1:
-                remaining = [parent.widget(i) for i in range(parent.count())
-                             if parent.widget(i) is not group]
+                remaining = [
+                    parent.widget(i) for i in range(parent.count()) if parent.widget(i) is not group
+                ]
                 grandparent = parent.parent()
                 if isinstance(grandparent, QSplitter) and remaining:
                     idx = grandparent.indexOf(parent)

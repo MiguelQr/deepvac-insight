@@ -1,7 +1,15 @@
 """ProfileDialog — change display name, email, and password for the signed-in user."""
+
 from PySide6.QtWidgets import (
-    QDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QVBoxLayout,
+    QDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
 )
 
 from app.services import auth_service
@@ -87,8 +95,7 @@ class ProfileDialog(QDialog):
             QMessageBox.warning(self, self.tr("Profile"), self.tr("New passwords do not match."))
             return
         try:
-            auth_service.change_password(
-                self.user["id"], self.current_pw_ed.text(), new_pw)
+            auth_service.change_password(self.user["id"], self.current_pw_ed.text(), new_pw)
         except auth_service.AuthError as exc:
             QMessageBox.warning(self, self.tr("Profile"), str(exc))
             return
