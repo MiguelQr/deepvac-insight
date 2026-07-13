@@ -1,5 +1,5 @@
 """DeepVacDesktop — the main application window."""
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout, QMainWindow, QMenu, QSizeGrip, QStackedWidget,
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from app.common import ICON_PATH, _nav_icon, _svg_icon
 from app.title_bar import TitleBar
 from app.tab_system import EditorArea
+from app.services import settings_service
 from app.views.dashboard  import DashboardMixin
 from app.views.runs       import RunsMixin
 from app.views.simulator  import SimulatorMixin
@@ -26,9 +27,11 @@ class DeepVacDesktop(
     OpcMixin,
     QMainWindow,
 ):
-    def __init__(self, splash=None):
+    def __init__(self, splash=None, current_user=None):
         super().__init__()
         self.splash = splash
+        self.current_user     = current_user or {"id": None, "name": "User", "email": ""}
+        self.logout_requested = False
         self.setWindowTitle("DeepVac Dashboard")
         self.setWindowIcon(QIcon(ICON_PATH))
         self.setWindowFlags(Qt.FramelessWindowHint)
@@ -36,7 +39,7 @@ class DeepVacDesktop(
         self.setMinimumSize(1100, 700)
 
         self.runs             = []
-        self.dark             = True
+        self.dark             = settings_service.load_theme()
         self.sim_worker       = None
         self.sim_series       = None
         self._sim_anim_timer  = None
@@ -49,6 +52,46 @@ class DeepVacDesktop(
         self._build_ui()
         self.apply_theme()
         self.load_runs()
+
+        # A daily backup already runs at process startup (app.app.main); this
+        # periodic check covers sessions left open across a day boundary.
+        # backup_all() is a same-day no-op, so firing this often is cheap.
+        self._backup_timer = QTimer(self)
+        self._backup_timer.timeout.connect(self._run_background_backup)
+        self._backup_timer.start(6 * 60 * 60 * 1000)
+
+    def _run_background_backup(self):
+        from app.services import backup_service
+        try:
+            backup_service.backup_all()
+        except Exception as exc:
+            print(f"[backup] periodic backup skipped: {exc}")
+
+    # ── Persisted UI state ───────────────────────────────────────────────────
+
+    def restore_window_state(self):
+        geo = settings_service.load_window_geometry()
+        if geo is not None:
+            self.restoreGeometry(geo)
+        if settings_service.load_window_maximized():
+            self.showMaximized()
+        else:
+            self.show()
+
+    def closeEvent(self, event):
+        self._persist_ui_state()
+        super().closeEvent(event)
+
+    def _persist_ui_state(self):
+        settings_service.save_theme(self.dark)
+        settings_service.save_window_geometry(self.saveGeometry())
+        settings_service.save_window_maximized(self.isMaximized())
+        open_keys = []
+        for grp in self.editor_area.all_groups():
+            open_keys.extend(grp.tab_bar.all_keys())
+        settings_service.save_open_tabs(open_keys)
+        active_page = self.editor_area.active_page()
+        settings_service.save_active_tab(active_page.run_key if active_page else None)
 
     # ── UI skeleton ───────────────────────────────────────────────────────────
 
@@ -132,8 +175,9 @@ class DeepVacDesktop(
         self.act_account_btn = QPushButton()
         self.act_account_btn.setObjectName("navButton")
         self.act_account_btn.setFixedSize(48, 46)
-        self.act_account_btn.setToolTip("Account")
+        self.act_account_btn.setToolTip(self.current_user.get("name", "Account"))
         self.act_account_btn.setIconSize(QSize(22, 22))
+        self.act_account_btn.clicked.connect(self._show_account_menu)
         lay.addWidget(self.act_account_btn)
 
         self.act_settings_btn = QPushButton()
@@ -175,6 +219,9 @@ class DeepVacDesktop(
         act_light = themes.addAction("Light")
         act_light.setCheckable(True)
         act_light.setChecked(not self.dark)
+        menu.addSeparator()
+        act_backup_now    = menu.addAction("Back Up Now")
+        act_open_backups  = menu.addAction("Open Backups Folder")
         btn    = self.act_settings_btn
         chosen = menu.exec(btn.mapToGlobal(QPoint(btn.width() + 4, 0)))
         if chosen == act_dark and not self.dark:
@@ -183,10 +230,67 @@ class DeepVacDesktop(
         elif chosen == act_light and self.dark:
             self.dark = False
             self.apply_theme()
+        elif chosen == act_backup_now:
+            self._backup_now()
+        elif chosen == act_open_backups:
+            self._open_backups_folder()
 
     def toggle_theme(self):
         self.dark = not self.dark
         self.apply_theme()
+
+    def _backup_now(self):
+        from PySide6.QtWidgets import QMessageBox
+        from app.services import backup_service
+        try:
+            results = backup_service.backup_all(force=True)
+        except Exception as exc:
+            QMessageBox.critical(self, "Backup", f"Backup failed: {exc}")
+            return
+        QMessageBox.information(
+            self, "Backup",
+            f"Backed up {len(results)} database(s) to data/backups/.")
+
+    def _open_backups_folder(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from app.services.backup_service import BACKUPS_DIR
+        BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(BACKUPS_DIR)))
+
+    # ── Account ───────────────────────────────────────────────────────────────
+
+    def _show_account_menu(self):
+        menu = QMenu(self)
+        header = menu.addAction(self.current_user.get("name", "Account"))
+        header.setEnabled(False)
+        menu.addSeparator()
+        act_profile = menu.addAction("Profile")
+        act_logout  = menu.addAction("Log out")
+        btn    = self.act_account_btn
+        chosen = menu.exec(btn.mapToGlobal(QPoint(btn.width() + 4, 0)))
+        if chosen == act_profile:
+            self._show_profile_dialog()
+        elif chosen == act_logout:
+            self._logout()
+
+    def _show_profile_dialog(self):
+        from app.profile_dialog import ProfileDialog
+        dlg = ProfileDialog(self.current_user, self)
+        dlg.exec()
+        self.current_user = dlg.updated_user
+        self.act_account_btn.setToolTip(self.current_user.get("name", "Account"))
+
+    def _logout(self):
+        from PySide6.QtCore import QSettings
+        from app.services import auth_service
+        settings = QSettings("DeepVac", "Insight")
+        token = settings.value("auth/remember_token", "")
+        if token:
+            auth_service.clear_remember_token(token)
+            settings.remove("auth/remember_token")
+        self.logout_requested = True
+        self.close()
 
     # ── Utilities ─────────────────────────────────────────────────────────────
 

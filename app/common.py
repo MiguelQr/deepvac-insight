@@ -5,8 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextDocument
-from PySide6.QtPrintSupport import QPrinter
+from PySide6.QtGui import QIcon, QPainter, QPixmap
 
 PROJECT_ROOT  = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = PROJECT_ROOT / "resources"
@@ -59,15 +58,6 @@ def csv_escape(value) -> str:
     if any(ch in text for ch in [",", '"', "\n", "\r"]):
         return '"' + text.replace('"', '""') + '"'
     return text
-
-
-def _html_to_pdf(html_content: str, output_path: str) -> None:
-    printer = QPrinter()
-    printer.setOutputFormat(QPrinter.PdfFormat)
-    printer.setOutputFileName(output_path)
-    doc = QTextDocument()
-    doc.setHtml(html_content)
-    doc.print_(printer)
 
 
 def _render_svg(name: str, color: str, size: int = 20) -> QPixmap:

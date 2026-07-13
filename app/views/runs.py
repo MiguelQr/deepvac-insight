@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 from app.common import fmt, _svg_icon
 from app.run_tab import RunTabPage
 import app.services.data_service as data
+import app.services.settings_service as settings_service
 
 
 class UploadWorker(QThread):
@@ -108,8 +109,18 @@ class RunsMixin:
         self.runs = payload["runs"]
         self.render_runs()
         self._refresh_dashboard()
-        if self.runs:
-            self._open_run(self.runs[0]["key"])
+        self._restore_open_tabs()
+
+    def _restore_open_tabs(self):
+        available = {r["key"] for r in self.runs}
+        keys = [k for k in settings_service.load_open_tabs() if k in available]
+        if not keys and self.runs:
+            keys = [self.runs[0]["key"]]
+        for key in keys:
+            self._open_run(key)
+        active = settings_service.load_active_tab()
+        if active in keys:
+            self._open_run(active)
 
     def render_runs(self):
         query       = self.search_box.text().lower().strip()
@@ -252,7 +263,7 @@ class RunsMixin:
             if grp.has_key(key):
                 grp.tab_bar.add_or_focus(key, run_id)
                 return
-        page = RunTabPage(key, self.runs, dark=self.dark)
+        page = RunTabPage(key, self.runs, dark=self.dark, current_user=self.current_user)
         page.compare_changed.connect(lambda keys: self.render_runs())
         self.editor_area.register_chart(page.chart)
         self.editor_area.open_run(key, run_id, page)

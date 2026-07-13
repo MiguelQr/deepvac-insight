@@ -38,7 +38,21 @@
       "Bash(mv deepvac_runs.sqlite3 data/deepvac_runs.sqlite3)",
       "Bash(find . -name \"*.py\" -not -path \"*/\\\\.*\")",
       "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m py_compile main.py app/__init__.py app/app.py app/chart_widget.py app/common.py app/main_window.py app/model/__init__.py app/model/simulation.py app/run_tab.py app/services/__init__.py app/services/data_service.py app/tab_system.py app/title_bar.py app/views/__init__.py app/views/dashboard.py app/views/monitoring.py app/views/opc.py app/views/reports.py app/views/runs.py app/views/simulator.py)",
-      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -c ' *)"
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -c ' *)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m py_compile main.py app/app.py app/main_window.py app/login_window.py app/profile_dialog.py app/services/auth_service.py)",
+      "Bash(QT_QPA_PLATFORM=offscreen timeout 30 /c/Users/mike_/.conda/envs/deepapp/python.exe -I -c ' *)",
+      "Bash(rm -f /c/Users/mike_/AppData/Local/Temp/claude/c--Users-mike--Desktop-deepvac-insight/7992bfea-42b7-4f76-b038-53669d54b380/scratchpad/test_auth*.sqlite3* *)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m py_compile app/login_window.py)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m py_compile app/run_tab.py app/views/runs.py app/services/annotations_service.py)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m py_compile app/app.py app/main_window.py app/services/backup_service.py)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m pip list)",
+      "Bash(python3 -c ' *)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m pip install --dry-run -r requirements.txt)",
+      "Bash(xargs /c/Users/mike_/.conda/envs/deepapp/python.exe -I -m py_compile)",
+      "Bash(rm -f /c/Users/mike_/AppData/Local/Temp/claude/c--Users-mike--Desktop-deepvac-insight/7992bfea-42b7-4f76-b038-53669d54b380/scratchpad/test_ui_state_auth.sqlite3*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\mike_\\AppData\\Local\\Temp\\claude\\c--Users-mike--Desktop-deepvac-insight\\7992bfea-42b7-4f76-b038-53669d54b380\\scratchpad"
     ]
   }
 }

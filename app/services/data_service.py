@@ -1,5 +1,4 @@
 import csv
-import html
 import json
 import math
 import os
@@ -688,69 +687,6 @@ def make_report_xlsx(run_id, output_path):
     table = run_table(run_id)
     df = pd.DataFrame(table["rows"], columns=table["columns"])
     df.to_excel(output_path, index=False, engine="openpyxl", sheet_name="Raw Data")
-
-
-def make_report_html(run_id):
-    cached = cached_run_payload(run_id)
-    if cached:
-        samples = cached["samples_rows"]
-        summary = cached["summary"]
-        bands = cached["bands"]
-        record = cached["run"]
-    else:
-        path = run_dir(run_id)
-        samples = read_samples(path)
-        summary = read_summary(path)
-        bands = csv_dicts(path / BAND_METRICS_FILE)
-        record = run_record(path / SAMPLES_FILE)
-    summary_rows = "".join(
-        f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(value))}</td></tr>"
-        for key, value in summary.items()
-    )
-    band_columns = list(bands[0].keys()) if bands else []
-    band_head = "".join(f"<th>{html.escape(column)}</th>" for column in band_columns)
-    band_body = "".join(
-        "<tr>" + "".join(f"<td>{html.escape(str(row.get(column, '')))}</td>" for column in band_columns) + "</tr>"
-        for row in bands
-    )
-
-    def metric(name):
-        return "-" if record.get(name) is None else record.get(name)
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>DeepVac Run Report - {html.escape(record["id"])}</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 32px; color: #172033; }}
-    header {{ display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #ccd5e1; padding-bottom: 16px; }}
-    h1 {{ margin: 0 0 8px; }}
-    table {{ width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }}
-    th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }}
-    th {{ background: #f1f5f9; }}
-    .metrics {{ display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 10px; margin: 18px 0; }}
-    .metric {{ border: 1px solid #dbe2ea; border-radius: 8px; padding: 12px; }}
-    .metric span {{ display: block; color: #64748b; font-size: 11px; text-transform: uppercase; }}
-    .metric strong {{ display: block; margin-top: 5px; font-size: 20px; }}
-  </style>
-</head>
-<body>
-  <header><div><h1>{html.escape(record["id"])}</h1><div>{html.escape(record["group"])}</div></div></header>
-  <section class="metrics">
-    <div class="metric"><span>Cost</span><strong>{html.escape(str(metric("cost")))}</strong></div>
-    <div class="metric"><span>MAE</span><strong>{html.escape(str(metric("mae")))}</strong></div>
-    <div class="metric"><span>Tail MAE</span><strong>{html.escape(str(metric("tail_mae")))}</strong></div>
-    <div class="metric"><span>Overshoot</span><strong>{html.escape(str(metric("overshoot")))}</strong></div>
-    <div class="metric"><span>Settle Time</span><strong>{html.escape(str(metric("settle_time_s")))} s</strong></div>
-  </section>
-  <h2>Summary</h2>
-  <table><tbody>{summary_rows}</tbody></table>
-  <h2>PID Schedule</h2>
-  <table><thead><tr>{band_head}</tr></thead><tbody>{band_body}</tbody></table>
-  <p>{len(samples)} samples available in run data CSV.</p>
-</body>
-</html>"""
 
 
 def make_sim_args(payload):

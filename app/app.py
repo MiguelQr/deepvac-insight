@@ -1,12 +1,14 @@
-"""Entry point — splash screen and main() only."""
+"""Entry point — login flow, splash screen, and main() only."""
 import sys
 
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import Qt, QRectF, QSettings
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
 from app.common import LOGO_PATH, ICON_PATH
 from app.main_window import DeepVacDesktop
+from app.login_window import LoginWindow
+from app.services import auth_service, backup_service, log_service
 
 
 class LoadingSplash(QSplashScreen):
@@ -45,19 +47,48 @@ def make_splash():
     return LoadingSplash(pixmap)
 
 
+def _remembered_user():
+    token = QSettings("DeepVac", "Insight").value("auth/remember_token", "")
+    return auth_service.get_user_by_token(token) if token else None
+
+
 def main():
+    log_service.install_excepthook()
+
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(ICON_PATH))
 
-    splash = make_splash()
-    splash.show()
-    splash.showMessage("Starting DeepVac…", Qt.AlignCenter | Qt.AlignBottom, Qt.white)
-    app.processEvents()
+    try:
+        backup_service.backup_all()
+    except Exception as exc:
+        print(f"[backup] startup backup skipped: {exc}")
 
-    window = DeepVacDesktop(splash=splash)
-    window.showMaximized()
-    splash.finish(window)
-    sys.exit(app.exec())
+    user = _remembered_user()
+
+    while True:
+        if user is None:
+            login = LoginWindow()
+            login.show()
+            app.exec()
+            user = login.authenticated_user
+            if user is None:
+                sys.exit(0)
+
+        splash = make_splash()
+        splash.show()
+        splash.showMessage("Starting DeepVac…", Qt.AlignCenter | Qt.AlignBottom, Qt.white)
+        app.processEvents()
+
+        window = DeepVacDesktop(splash=splash, current_user=user)
+        window.restore_window_state()
+        splash.finish(window)
+        app.exec()
+
+        if not window.logout_requested:
+            break
+        user = None
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":

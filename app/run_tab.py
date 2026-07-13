@@ -1,8 +1,8 @@
 """Analysis tab page (RunTabPage) shown for each opened run, plus SimWorker."""
 import csv
 
-from PySide6.QtCore import QSize, Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QAction, QColor, QDesktopServices
+from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
     QHBoxLayout, QLabel, QLineEdit,
@@ -10,12 +10,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QWidgetAction,
 )
 
-from app.common import (
-    REPORTS_DIR, COLORS, RULE_COLOR_OPTIONS, fmt, csv_escape,
-    _html_to_pdf, _svg_icon,
-)
+from app.common import COLORS, RULE_COLOR_OPTIONS, fmt, csv_escape, _svg_icon
 from app.chart_widget import ChartWidget
 import app.services.data_service as data
+import app.services.annotations_service as annotations_service
+import app.services.settings_service as settings_service
 
 
 class SimWorker(QThread):
@@ -36,20 +35,21 @@ class SimWorker(QThread):
 class RunTabPage(QWidget):
     compare_changed = Signal(set)
 
-    def __init__(self, run_key, all_runs, dark=True, parent=None):
+    def __init__(self, run_key, all_runs, dark=True, current_user=None, parent=None):
         super().__init__(parent)
         self.run_key          = run_key
         self.all_runs         = all_runs
         self.active_run       = run_key
         self.detail           = None
         self.series           = None
-        self.selected_columns = {"temp", "temp_ref"}
+        self.selected_columns = set()  # populated in load() from saved settings or defaults
         self._channel_colors  = {}
         self.compare_runs     = {run_key}
         self.dark             = dark
-        self._user_annotations  = []   # [{x0, x1, label, color}]
+        self.current_user       = current_user or {"id": None, "name": "Unknown", "email": ""}
+        self._user_annotations  = []   # [{id, x0, x1, label, color, user_name, ...}] — persisted
         self._ann_list_layout   = None
-        self._var_rules         = []   # [{name, channel, lo, hi, color}]
+        self._var_rules         = []   # [{id, name, channel, lo, hi, color, user_name, ...}] — persisted
         self._rule_ch_combo     = None
         self._rules_list_layout = None
         self._build_ui()
@@ -128,7 +128,6 @@ class RunTabPage(QWidget):
             ("Chart PNG",       self.export_chart_png),
             ("Run CSV",         self.export_run_csv),
             ("Comparison CSV",  self.export_comparison_csv),
-            ("Run Report",      self.open_report),
         ]:
             act = QAction(label, dl_menu)
             act.triggered.connect(slot)
@@ -239,13 +238,21 @@ class RunTabPage(QWidget):
             QMessageBox.critical(self, "Load error", str(exc))
             return
         if not any(c in self.detail["numeric_columns"] for c in self.selected_columns):
-            preferred = [c for c in ["temp", "temp_ref"]
-                         if c in self.detail["numeric_columns"]]
-            self.selected_columns = set(preferred or self.detail["numeric_columns"][:3])
+            numeric_cols = self.detail["numeric_columns"]
+            saved = [c for c in settings_service.load_channels(self.run_key) if c in numeric_cols]
+            if saved:
+                self.selected_columns = set(saved)
+            else:
+                preferred = [c for c in ["temp", "temp_ref"] if c in numeric_cols]
+                self.selected_columns = set(preferred or numeric_cols[:3])
         run = self.detail.get("run", {})
         self.title_label.setText(run.get("id", self.run_key))
+        self._user_annotations = annotations_service.list_annotations(self.run_key)
+        self._var_rules        = annotations_service.list_rules(self.run_key)
         self._render_summary()
         self._render_channels()
+        self._refresh_annotations_list()
+        self._refresh_rules_list()
         self._load_series()
 
     def set_compare_run(self, key, checked):
@@ -334,6 +341,7 @@ class RunTabPage(QWidget):
             self.selected_columns.discard(col)
         self._update_ch_btn_label()
         self._load_series()
+        settings_service.save_channels(self.run_key, sorted(self.selected_columns))
 
     def _pick_channel_color(self, col, menu):
         menu.close()
@@ -434,14 +442,21 @@ class RunTabPage(QWidget):
         self._ann_btn.setText("Done" if checked else "Annotate")
 
     def _on_annotation_committed(self, ann: dict):
-        self._user_annotations.append(ann)
+        saved = annotations_service.add_annotation(
+            run_key=self.run_key,
+            user_id=self.current_user.get("id"),
+            user_name=self.current_user.get("name", "Unknown"),
+            x0=ann["x0"], x1=ann["x1"], label=ann["label"], color=ann["color"],
+        )
+        self._user_annotations.append(saved)
         self._ann_btn.setChecked(False)
         self._refresh_annotations_list()
         self.refresh_chart()
 
     def _delete_user_annotation(self, idx: int):
         if 0 <= idx < len(self._user_annotations):
-            self._user_annotations.pop(idx)
+            ann = self._user_annotations.pop(idx)
+            annotations_service.delete_annotation(ann["id"])
         self._refresh_annotations_list()
         self.refresh_chart()
 
@@ -460,7 +475,10 @@ class RunTabPage(QWidget):
             rlay.setSpacing(10)
             swatch = QLabel("■")
             swatch.setStyleSheet(f"color: {ann['color']}; background: transparent; font-size: 14px;")
-            desc = QLabel(f"<b>{ann['label']}</b>  ·  {ann['x0']:.1f} – {ann['x1']:.1f} s")
+            desc = QLabel(
+                f"<b>{ann['label']}</b>  ·  {ann['x0']:.1f} – {ann['x1']:.1f} s"
+                f"  ·  {ann.get('user_name', 'Unknown')}"
+            )
             desc.setStyleSheet("background: transparent;")
             del_btn = QPushButton("✕")
             del_btn.setObjectName("tabClose")
@@ -578,10 +596,14 @@ class RunTabPage(QWidget):
         if lo is None and hi is None:
             return
         _, color = RULE_COLOR_OPTIONS[self._rule_color_combo.currentIndex()]
-        self._var_rules.append({
-            "name": self._rule_name_ed.text().strip() or ch,
-            "channel": ch, "lo": lo, "hi": hi, "color": color,
-        })
+        saved = annotations_service.add_rule(
+            run_key=self.run_key,
+            user_id=self.current_user.get("id"),
+            user_name=self.current_user.get("name", "Unknown"),
+            name=self._rule_name_ed.text().strip() or ch,
+            channel=ch, lo=lo, hi=hi, color=color,
+        )
+        self._var_rules.append(saved)
         self._rule_lo_ed.clear()
         self._rule_hi_ed.clear()
         self._rule_name_ed.clear()
@@ -590,7 +612,8 @@ class RunTabPage(QWidget):
 
     def _remove_var_rule(self, idx):
         if 0 <= idx < len(self._var_rules):
-            self._var_rules.pop(idx)
+            rule = self._var_rules.pop(idx)
+            annotations_service.delete_rule(rule["id"])
         self._refresh_rules_list()
         self.refresh_chart()
 
@@ -609,7 +632,10 @@ class RunTabPage(QWidget):
             swatch.setStyleSheet(f"color: {rule['color']}; background: transparent; font-size: 14px;")
             lo_str = f"{rule['lo']:g}" if rule["lo"] is not None else "−∞"
             hi_str = f"{rule['hi']:g}" if rule["hi"] is not None else "+∞"
-            desc = QLabel(f"<b>{rule['name']}</b>  ·  {rule['channel']}  [{lo_str} , {hi_str}]")
+            desc = QLabel(
+                f"<b>{rule['name']}</b>  ·  {rule['channel']}  [{lo_str} , {hi_str}]"
+                f"  ·  {rule.get('user_name', 'Unknown')}"
+            )
             desc.setStyleSheet("background: transparent;")
             del_btn = QPushButton("✕")
             del_btn.setObjectName("tabClose")
@@ -669,15 +695,3 @@ class RunTabPage(QWidget):
             lines.append(",".join(csv_escape(r[k]) for k in ["id", "cost", "mae", "tail_mae", "overshoot"]))
         from pathlib import Path as _Path
         _Path(path).write_text("\n".join(lines), encoding="utf-8")
-
-    def open_report(self):
-        if not self.detail:
-            return
-        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        path = REPORTS_DIR / f"{self.detail['run']['id']}.pdf"
-        try:
-            _html_to_pdf(data.make_report_html(self.run_key), str(path))
-        except Exception as exc:
-            QMessageBox.critical(self, "Report error", str(exc))
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
