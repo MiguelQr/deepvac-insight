@@ -444,6 +444,8 @@ class MonitoringMixin:
                 self._mon_recording_lbl.setText(self.tr("Not recording"))
             if self._test_running_profile is not None:
                 self._test_stop(error=self.tr("chamber disconnected"))
+            if self._manual_running:
+                self._stop_manual_setpoint(error=self.tr("chamber disconnected"))
             self._maybe_schedule_reconnect()
         self._on_test_profile_changed()
         for alarm in self._monitor_alarms:

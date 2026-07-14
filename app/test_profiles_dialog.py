@@ -1,5 +1,5 @@
 """TestProfilesDialog — create/edit/delete multi-step test profiles
-(app/services/test_profiles_service.py) from Live Monitoring's Test
+(app/services/test_profiles_service.py) from the Controller page's Test
 Profiles picker."""
 
 from PySide6.QtCore import Qt
@@ -13,13 +13,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from app.services import test_profiles_service as profiles
 
 _STEP_COLUMNS = ["Temp (°C)", "Pressure", "Duration (s)", "Label"]
+_STEP_PLACEHOLDERS = ["optional", "optional", "required", "optional"]
 
 
 class TestProfilesDialog(QDialog):
@@ -55,16 +56,9 @@ class TestProfilesDialog(QDialog):
         name_row = QHBoxLayout()
         name_row.addWidget(QLabel(self.tr("Name")))
         self._name_ed = QLineEdit()
-        self._name_ed.setPlaceholderText(self.tr("e.g. Thermal Soak Test A"))
+        self._name_ed.setPlaceholderText(self.tr("Thermal Test A"))
         name_row.addWidget(self._name_ed, 1)
         right.addLayout(name_row)
-
-        desc_row = QHBoxLayout()
-        desc_row.addWidget(QLabel(self.tr("Description")))
-        self._desc_ed = QLineEdit()
-        self._desc_ed.setPlaceholderText(self.tr("Optional"))
-        desc_row.addWidget(self._desc_ed, 1)
-        right.addLayout(desc_row)
 
         steps_lbl = QLabel(self.tr("STEPS (in order)"))
         steps_lbl.setObjectName("sectionLabel")
@@ -75,11 +69,17 @@ class TestProfilesDialog(QDialog):
         self._steps_table.setHorizontalHeaderLabels([self.tr(c) for c in _STEP_COLUMNS])
         self._steps_table.horizontalHeader().setStretchLastSection(True)
         self._steps_table.verticalHeader().setVisible(False)
+        self._steps_table.verticalHeader().setDefaultSectionSize(44)
         right.addWidget(self._steps_table, 1)
 
         step_btn_row = QHBoxLayout()
         add_step_btn = QPushButton(self.tr("+ Add Step"))
-        add_step_btn.clicked.connect(self._add_step_row)
+        # NOT add_step_btn.clicked.connect(self._add_step_row) -- QPushButton.
+        # clicked emits a `checked: bool` argument, which would land in
+        # _add_step_row's leading `temp=` parameter (Qt passes it
+        # positionally), setting every new row's Temp cell to the literal
+        # text "False" instead of leaving it blank.
+        add_step_btn.clicked.connect(lambda: self._add_step_row())
         remove_step_btn = QPushButton(self.tr("Remove Step"))
         remove_step_btn.clicked.connect(self._remove_selected_step)
         move_up_btn = QPushButton(self.tr("Move Up"))
@@ -110,11 +110,28 @@ class TestProfilesDialog(QDialog):
 
     # ── steps table helpers ─────────────────────────────────────────────────
 
+    def _step_cell_editor(self, placeholder, value):
+        # A real QLineEdit per cell (not a bare QTableWidgetItem) so it's
+        # visually obvious each cell is a text field to click into and
+        # type a number, not a static label -- see the dialog's own
+        # docstring/steps_hint for the bug this fixes. Keeps its frame
+        # (border) and a bit of extra height so it actually reads as an
+        # input box against the table's dark background, rather than
+        # blending into the cell and looking uneditable.
+        ed = QLineEdit()
+        ed.setPlaceholderText(placeholder)
+        ed.setMinimumHeight(36)
+        if value != "":
+            ed.setText(str(value))
+        return ed
+
     def _add_step_row(self, temp="", pressure="", duration="", label=""):
         row = self._steps_table.rowCount()
         self._steps_table.insertRow(row)
         for col, value in enumerate([temp, pressure, duration, label]):
-            self._steps_table.setItem(row, col, QTableWidgetItem(str(value)))
+            self._steps_table.setCellWidget(
+                row, col, self._step_cell_editor(_STEP_PLACEHOLDERS[col], value)
+            )
 
     def _remove_selected_step(self):
         row = self._steps_table.currentRow()
@@ -126,27 +143,29 @@ class TestProfilesDialog(QDialog):
         target = row + delta
         if row < 0 or target < 0 or target >= self._steps_table.rowCount():
             return
+        texts_row = [self._cell_text(row, col) for col in range(self._steps_table.columnCount())]
+        texts_target = [
+            self._cell_text(target, col) for col in range(self._steps_table.columnCount())
+        ]
         for col in range(self._steps_table.columnCount()):
-            a = self._steps_table.takeItem(row, col)
-            b = self._steps_table.takeItem(target, col)
-            self._steps_table.setItem(row, col, b)
-            self._steps_table.setItem(target, col, a)
+            self._cell_widget(row, col).setText(texts_target[col])
+            self._cell_widget(target, col).setText(texts_row[col])
         self._steps_table.setCurrentCell(target, 0)
+
+    def _cell_widget(self, row, col):
+        return self._steps_table.cellWidget(row, col)
+
+    def _cell_text(self, row, col):
+        widget = self._cell_widget(row, col)
+        return widget.text().strip() if isinstance(widget, QWidget) else ""
 
     def _read_steps(self):
         steps = []
         for row in range(self._steps_table.rowCount()):
-
-            def cell(col, row=row):
-                item = self._steps_table.item(row, col)
-                return item.text().strip() if item else ""
-
-            temp_text, pressure_text, duration_text, label = (
-                cell(0),
-                cell(1),
-                cell(2),
-                cell(3),
-            )
+            temp_text = self._cell_text(row, 0)
+            pressure_text = self._cell_text(row, 1)
+            duration_text = self._cell_text(row, 2)
+            label = self._cell_text(row, 3)
             try:
                 temp = float(temp_text) if temp_text else None
                 pressure = float(pressure_text) if pressure_text else None
@@ -187,7 +206,6 @@ class TestProfilesDialog(QDialog):
             return
         self._editing_id = profile["id"]
         self._name_ed.setText(profile["name"])
-        self._desc_ed.setText(profile["description"])
         self._steps_table.setRowCount(0)
         for step in profile["steps"]:
             self._add_step_row(
@@ -201,20 +219,18 @@ class TestProfilesDialog(QDialog):
     def _reset_form(self):
         self._editing_id = None
         self._name_ed.clear()
-        self._desc_ed.clear()
         self._steps_table.setRowCount(0)
         self._save_btn.setText(self.tr("Save Profile"))
 
     def _save(self):
         name = self._name_ed.text().strip()
-        description = self._desc_ed.text().strip()
         try:
             steps = self._read_steps()
             if self._editing_id is not None:
-                profiles.update_profile(self._editing_id, name, description, steps)
+                profiles.update_profile(self._editing_id, name, "", steps)
             else:
                 profiles.add_profile(
-                    name, description, steps, created_by=self.current_user.get("name") or "Unknown"
+                    name, "", steps, created_by=self.current_user.get("name") or "Unknown"
                 )
         except profiles.TestProfileError as exc:
             QMessageBox.critical(self, self.tr("Could not save test profile"), str(exc))

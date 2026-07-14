@@ -1,6 +1,7 @@
-"""ControllerMixin — builds the Controller page: Test Profiles (multi-step
-temperature/pressure schedules) and the step-sequencer that runs one
-against whichever chamber is connected via Live Monitoring.
+"""ControllerMixin — builds the Controller page: a one-off Manual Setpoint
+sender and Test Profiles (multi-step temperature/pressure schedules) with
+the step-sequencer that runs one, both against whichever chamber is
+connected via Live Monitoring.
 
 The chamber connection itself (services/tcp_client.ChamberConnection,
 self.tcp) is shared app-wide and owned by Live Monitoring (views/
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -25,6 +27,13 @@ from PySide6.QtWidgets import (
 )
 
 import app.services.test_profiles_service as test_profiles_service
+
+
+def _format_hms(seconds):
+    seconds = int(max(0.0, seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 class ControllerMixin:
@@ -38,15 +47,6 @@ class ControllerMixin:
         hdr = QLabel(self.tr("Controller"))
         hdr.setObjectName("pageTitle")
         outer.addWidget(hdr)
-        sub = QLabel(
-            self.tr(
-                "Run multi-step temperature/pressure test profiles against the chamber "
-                "connected in Live Monitoring."
-            )
-        )
-        sub.setObjectName("sectionLabel")
-        sub.setWordWrap(True)
-        outer.addWidget(sub)
 
         status_row = QHBoxLayout()
         self._ctrl_chamber_dot = QLabel("●")
@@ -64,6 +64,47 @@ class ControllerMixin:
         self._test_timer = None
         self._test_tick_timer = None
 
+        self._manual_running = False
+        self._manual_started_at = None
+        self._manual_timer = None
+
+        # ── Manual Setpoint ──────────────────────────────────────────────────
+        manual_card = QFrame()
+        manual_card.setObjectName("card")
+        mnl = QVBoxLayout(manual_card)
+        mnl.setContentsMargins(14, 14, 14, 14)
+        mnl.setSpacing(10)
+
+        manual_hdr = QLabel(self.tr("MANUAL SETPOINT"))
+        manual_hdr.setObjectName("sectionLabel")
+        mnl.addWidget(manual_hdr)
+
+        manual_row = QHBoxLayout()
+        manual_row.addWidget(QLabel(self.tr("Temp (°C)")))
+        self._manual_temp_ed = QLineEdit()
+        self._manual_temp_ed.setPlaceholderText(self.tr("optional"))
+        self._manual_temp_ed.setFixedWidth(90)
+        manual_row.addWidget(self._manual_temp_ed)
+        manual_row.addWidget(QLabel(self.tr("Pressure")))
+        self._manual_pressure_ed = QLineEdit()
+        self._manual_pressure_ed.setPlaceholderText(self.tr("optional"))
+        self._manual_pressure_ed.setFixedWidth(90)
+        manual_row.addWidget(self._manual_pressure_ed)
+        self._manual_send_btn = QPushButton(self.tr("Start"))
+        self._manual_send_btn.setObjectName("primaryButton")
+        self._manual_send_btn.setEnabled(False)
+        self._manual_send_btn.clicked.connect(self._on_manual_button_clicked)
+        manual_row.addWidget(self._manual_send_btn)
+        manual_row.addStretch(1)
+        mnl.addLayout(manual_row)
+
+        self._manual_status_lbl = QLabel(self.tr("Not running"))
+        self._manual_status_lbl.setObjectName("statusText")
+        self._manual_status_lbl.setWordWrap(True)
+        mnl.addWidget(self._manual_status_lbl)
+
+        outer.addWidget(manual_card)
+
         # ── Test Profiles ────────────────────────────────────────────────────
         profiles_card = QFrame()
         profiles_card.setObjectName("card")
@@ -75,16 +116,8 @@ class ControllerMixin:
         pflbl = QLabel(self.tr("TEST PROFILES"))
         pflbl.setObjectName("sectionLabel")
         profiles_hdr.addWidget(pflbl)
-        pfdesc = QLabel(
-            self.tr(
-                "Multi-step temperature/pressure schedules -- Start Test sends each "
-                "step's setpoint to the connected chamber in turn."
-            )
-        )
-        pfdesc.setObjectName("sectionLabel")
-        pfdesc.setWordWrap(True)
-        profiles_hdr.addWidget(pfdesc, 1)
-        manage_profiles_btn = QPushButton(self.tr("Manage Test Profiles…"))
+        profiles_hdr.addStretch(1)
+        manage_profiles_btn = QPushButton(self.tr("Manage Test Profiles"))
         manage_profiles_btn.clicked.connect(self._open_test_profiles_dialog)
         profiles_hdr.addWidget(manage_profiles_btn)
         pfl.addLayout(profiles_hdr)
@@ -136,6 +169,89 @@ class ControllerMixin:
             )
         self._on_test_profile_changed()
 
+    # ── Manual Setpoint ──────────────────────────────────────────────────────
+
+    def _on_manual_button_clicked(self):
+        if self._manual_running:
+            self._stop_manual_setpoint()
+        else:
+            self._start_manual_setpoint()
+
+    def _start_manual_setpoint(self):
+        temp_text = self._manual_temp_ed.text().strip()
+        pressure_text = self._manual_pressure_ed.text().strip()
+        if not temp_text and not pressure_text:
+            QMessageBox.warning(
+                self, self.tr("Start"), self.tr("Enter a temperature and/or pressure.")
+            )
+            return
+        try:
+            temp = float(temp_text) if temp_text else None
+            pressure = float(pressure_text) if pressure_text else None
+        except ValueError:
+            QMessageBox.warning(
+                self, self.tr("Start"), self.tr("Temperature/pressure must be numbers.")
+            )
+            return
+        if not self.tcp.is_connected():
+            QMessageBox.warning(self, self.tr("Start"), self.tr("Connect to a chamber first."))
+            return
+        if self._test_running_profile is not None:
+            QMessageBox.warning(
+                self, self.tr("Start"), self.tr("Stop the running test profile first.")
+            )
+            return
+        payload = {
+            "cmd": "set_point",
+            "temperature": temp,
+            "pressure": pressure,
+            "step_index": None,
+            "step_label": "Manual setpoint",
+            "profile_name": None,
+        }
+        try:
+            self.tcp.send_command(payload)
+        except RuntimeError as exc:
+            self._manual_status_lbl.setText(self.tr("Failed: {0}").format(str(exc)))
+            return
+
+        self._manual_running = True
+        self._manual_started_at = time.monotonic()
+        self._manual_temp_ed.setEnabled(False)
+        self._manual_pressure_ed.setEnabled(False)
+        self._manual_send_btn.setText(self.tr("Stop"))
+        self._update_manual_elapsed_label()
+        self._manual_timer = QTimer(self)
+        self._manual_timer.timeout.connect(self._update_manual_elapsed_label)
+        self._manual_timer.start(1000)
+        self._on_test_profile_changed()
+
+    def _stop_manual_setpoint(self, error=None):
+        if not self._manual_running:
+            return
+        if self._manual_timer is not None:
+            self._manual_timer.stop()
+            self._manual_timer = None
+        elapsed = time.monotonic() - self._manual_started_at if self._manual_started_at else 0.0
+        self._manual_running = False
+        self._manual_started_at = None
+        self._manual_temp_ed.setEnabled(True)
+        self._manual_pressure_ed.setEnabled(True)
+        self._manual_send_btn.setText(self.tr("Start"))
+        if error:
+            self._manual_status_lbl.setText(self.tr("Stopped: {0}").format(error))
+        else:
+            self._manual_status_lbl.setText(
+                self.tr("Stopped after {0}").format(_format_hms(elapsed))
+            )
+        self._on_test_profile_changed()
+
+    def _update_manual_elapsed_label(self):
+        if not self._manual_running or self._manual_started_at is None:
+            return
+        elapsed = time.monotonic() - self._manual_started_at
+        self._manual_status_lbl.setText(self.tr("Running for {0}").format(_format_hms(elapsed)))
+
     # ── Test Profiles ────────────────────────────────────────────────────────
 
     def _load_test_profiles(self):
@@ -165,14 +281,22 @@ class ControllerMixin:
         self._on_test_profile_changed()
 
     def _on_test_profile_changed(self):
-        can_start = (
-            self.tcp.is_connected()
+        connected = self.tcp.is_connected()
+        no_test_running = self._test_running_profile is None
+        can_start_test = (
+            connected
             and self._test_profile_combo.count() > 0
             and self._test_profile_combo.currentData() is not None
             and bool(self._test_profile_combo.currentData()["steps"])
-            and self._test_running_profile is None
+            and no_test_running
+            and not self._manual_running
         )
-        self._test_start_btn.setEnabled(can_start)
+        self._test_start_btn.setEnabled(can_start_test)
+        # Stop must always be clickable (even if the chamber just dropped)
+        # so the user is never stuck with a "running" manual setpoint they
+        # can't get out of; Start additionally needs a live connection and
+        # no test profile currently running.
+        self._manual_send_btn.setEnabled(self._manual_running or (connected and no_test_running))
 
     def _open_test_profiles_dialog(self):
         from app.test_profiles_dialog import TestProfilesDialog
@@ -189,12 +313,18 @@ class ControllerMixin:
         if not self.tcp.is_connected():
             QMessageBox.warning(self, self.tr("Start Test"), self.tr("Connect to a chamber first."))
             return
+        if self._manual_running:
+            QMessageBox.warning(
+                self, self.tr("Start Test"), self.tr("Stop the manual setpoint first.")
+            )
+            return
         self._test_running_profile = profile
         self._session_test_profile_name = profile["name"]
         self._test_step_index = 0
         self._test_start_btn.setEnabled(False)
         self._test_stop_btn.setEnabled(True)
         self._test_profile_combo.setEnabled(False)
+        self._manual_send_btn.setEnabled(False)
         self._test_send_current_step()
 
     def _test_send_current_step(self):
