@@ -1,35 +1,118 @@
-"""DashboardMixin — builds and refreshes the Dashboard page."""
+"""DashboardMixin — builds and refreshes the Dashboard page.
+
+Two filtering tiers, matching the convention already used by
+views/reports.py's search+status filter: the Date Range control affects
+everything on the page (stat tiles, charts, insights, worst-runs, the
+table); Status/search only narrow the Recent Runs table itself, so
+looking for one run never blanks out the page's summary numbers.
+
+Chamber/Recipe are UI-only placeholders (single "All ..." option each) --
+this app has no multi-chamber registry and no recipe concept anywhere in
+its data model (there is exactly one live TCP chamber connection). Kept
+for layout parity with the mockup rather than removed, same spirit as the
+OPC Server page's own UI-only placeholder fields.
+"""
+
+from datetime import datetime, timedelta, timezone
 
 import pyqtgraph as pg
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
     QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from app.common import fmt
+import app.services.alarms_service as alarms_service
+from app.common import REPORTS_DIR, _svg_icon, fmt
+
+_DASH_PAGE_SIZE = 5
+_DASH_RANGES = [
+    ("7D", 7),
+    ("30D", 30),
+    ("90D", 90),
+    ("1Y", 365),
+    ("All", None),
+]
+
+
+def _parse_start_time(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _run_status(run):
+    if run.get("quality_errors"):
+        return "Anomaly"
+    if run.get("quality_warnings"):
+        return "Warning"
+    return "Completed"
+
+
+def _time_ago(dt):
+    if dt is None:
+        return None
+    seconds = max(0.0, (datetime.now(timezone.utc) - dt).total_seconds())
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m ago"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h ago"
+    return f"{int(seconds // 86400)}d ago"
+
+
+def _has_report(run):
+    return (REPORTS_DIR / f"{_safe_report_filename(run['id'])}.xlsx").exists()
+
+
+def _safe_report_filename(run_id):
+    safe = "".join(ch if ch not in '<>:"/\\|?*' else "_" for ch in str(run_id)).strip()
+    return safe or "run"
 
 
 class DashboardMixin:
-    def _dash_chart_card(self, title):
+    # ── layout builders ──────────────────────────────────────────────────────
+
+    def _dash_labeled(self, caption, widget):
+        box = QVBoxLayout()
+        box.setSpacing(3)
+        cap = QLabel(caption)
+        cap.setObjectName("sectionLabel")
+        box.addWidget(cap)
+        box.addWidget(widget)
+        return box
+
+    def _dash_card(self, title, header_extra=None):
         card = QFrame()
         card.setObjectName("card")
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(12, 12, 12, 10)
-        lay.setSpacing(6)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+        hdr = QHBoxLayout()
         lbl = QLabel(title)
         lbl.setObjectName("sectionLabel")
-        lay.addWidget(lbl)
-        plot = pg.PlotWidget()
-        plot.setBackground("#111827" if self.dark else "#f8fafc")
-        plot.showGrid(x=True, y=True, alpha=0.22)
-        plot.setMinimumHeight(210)
-        plot.setMenuEnabled(False)
-        lay.addWidget(plot)
-        return card, plot
+        hdr.addWidget(lbl)
+        hdr.addStretch(1)
+        if header_extra is not None:
+            hdr.addWidget(header_extra)
+        lay.addLayout(hdr)
+        return card, lay
 
     def _dashboard_view(self):
         scroll = QScrollArea()
@@ -38,30 +121,371 @@ class DashboardMixin:
         scroll.setFrameShape(QFrame.NoFrame)
         body = QWidget()
         body.setObjectName("workspaceBody")
-        self._dash_body = QVBoxLayout(body)
-        self._dash_body.setContentsMargins(24, 24, 24, 24)
-        self._dash_body.setSpacing(16)
+        root = QVBoxLayout(body)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
         scroll.setWidget(body)
 
-        hdr = QLabel(self.tr("Dashboard"))
-        hdr.setObjectName("pageTitle")
-        self._dash_body.addWidget(hdr)
+        # -- header ------------------------------------------------------
+        hdr_row = QHBoxLayout()
+        hdr_row.setSpacing(10)
+        title = QLabel(self.tr("Dashboard"))
+        title.setObjectName("pageTitle")
+        hdr_row.addWidget(title)
+        subtitle = QLabel(self.tr("Operational overview of run performance"))
+        subtitle.setStyleSheet("color: #94a3b8; font-size: 11pt; background: transparent;")
+        hdr_row.addWidget(subtitle)
+        hdr_row.addStretch(1)
+        root.addLayout(hdr_row)
 
+        # -- filter bar ----------------------------------------------------
+        filt_row = QHBoxLayout()
+        filt_row.setSpacing(14)
+
+        self._dash_range_combo = QComboBox()
+        for label, days in _DASH_RANGES:
+            self._dash_range_combo.addItem(self.tr(label), days)
+        self._dash_range_combo.setCurrentIndex(1)  # 30D default
+        self._dash_range_combo.currentIndexChanged.connect(self._dash_on_range_combo_changed)
+        filt_row.addLayout(self._dash_labeled(self.tr("Date Range"), self._dash_range_combo))
+
+        chamber_combo = QComboBox()
+        chamber_combo.addItem(self.tr("All Chambers"))
+        chamber_combo.setEnabled(False)
+        chamber_combo.setToolTip(
+            self.tr("This build only supports a single live chamber connection.")
+        )
+        filt_row.addLayout(self._dash_labeled(self.tr("Chamber"), chamber_combo))
+
+        recipe_combo = QComboBox()
+        recipe_combo.addItem(self.tr("All Recipes"))
+        recipe_combo.setEnabled(False)
+        recipe_combo.setToolTip(self.tr("Recipes are not tracked by this app yet."))
+        filt_row.addLayout(self._dash_labeled(self.tr("Recipe"), recipe_combo))
+
+        self._dash_status_combo = QComboBox()
+        self._dash_status_combo.addItem(self.tr("All Statuses"), "All")
+        self._dash_status_combo.addItem(self.tr("Completed"), "Completed")
+        self._dash_status_combo.addItem(self.tr("Warning"), "Warning")
+        self._dash_status_combo.addItem(self.tr("Anomaly"), "Anomaly")
+        self._dash_status_combo.currentIndexChanged.connect(self._dash_refresh_table)
+        filt_row.addLayout(self._dash_labeled(self.tr("Status"), self._dash_status_combo))
+
+        filt_row.addStretch(1)
+
+        self._dash_search = QLineEdit()
+        self._dash_search.setObjectName("searchBox")
+        self._dash_search.setPlaceholderText(self.tr("Search run ID…"))
+        self._dash_search.addAction(_svg_icon("search", "#64748b", 13), QLineEdit.LeadingPosition)
+        self._dash_search.setFixedWidth(220)
+        self._dash_search.textChanged.connect(self._dash_refresh_table)
+        filt_row.addWidget(self._dash_search)
+
+        refresh_btn = QPushButton()
+        refresh_btn.setIcon(_svg_icon("arrow-counterclockwise", "#94a3b8", 15))
+        refresh_btn.setToolTip(self.tr("Reload runs"))
+        refresh_btn.setFixedSize(34, 34)
+        refresh_btn.clicked.connect(self.load_runs)
+        filt_row.addWidget(refresh_btn)
+
+        export_btn = QPushButton(self.tr("Export"))
+        export_btn.setObjectName("primaryButton")
+        export_btn.setIcon(_svg_icon("download", "#ffffff", 14))
+        export_btn.clicked.connect(self._dash_export_csv)
+        filt_row.addWidget(export_btn)
+
+        root.addLayout(filt_row)
+
+        # -- stat tiles ------------------------------------------------------
         self._dash_stats_row = QHBoxLayout()
         self._dash_stats_row.setSpacing(12)
-        self._dash_body.addLayout(self._dash_stats_row)
+        root.addLayout(self._dash_stats_row)
 
-        charts_row = QHBoxLayout()
-        charts_row.setSpacing(12)
-        card1, self._dash_cost_plot = self._dash_chart_card(self.tr("COST OVER RUNS"))
-        card2, self._dash_mae_plot = self._dash_chart_card(self.tr("TAIL MAE DISTRIBUTION"))
-        card3, self._dash_ovr_plot = self._dash_chart_card(self.tr("OVERSHOOT vs COST"))
-        for c in [card1, card2, card3]:
-            charts_row.addWidget(c, 1)
-        self._dash_body.addLayout(charts_row)
-        self._dash_body.addStretch(1)
+        # -- main body: charts+table (left) / insights (right) --------------
+        main_row = QHBoxLayout()
+        main_row.setSpacing(12)
 
+        left_col = QVBoxLayout()
+        left_col.setSpacing(12)
+
+        range_row = QHBoxLayout()
+        range_row.setSpacing(2)
+        self._dash_range_btns = {}
+        for label, days in _DASH_RANGES:
+            btn = QPushButton(self.tr(label))
+            btn.setObjectName("dashRangeBtn")
+            btn.setCheckable(True)
+            btn.setFixedHeight(26)
+            btn.clicked.connect(lambda _checked, d=days: self._dash_set_range(d))
+            self._dash_range_btns[days] = btn
+            range_row.addWidget(btn)
+        range_row_widget = QWidget()
+        range_row_widget.setLayout(range_row)
+        trend_card, trend_lay = self._dash_card(
+            self.tr("PERFORMANCE TREND — COST OVER RUNS"), header_extra=range_row_widget
+        )
+        self._dash_cost_plot = pg.PlotWidget()
+        self._dash_cost_plot.setBackground("#111827" if self.dark else "#f8fafc")
+        self._dash_cost_plot.showGrid(x=True, y=True, alpha=0.22)
+        self._dash_cost_plot.setMinimumHeight(230)
+        self._dash_cost_plot.setMenuEnabled(False)
+        trend_lay.addWidget(self._dash_cost_plot)
+        left_col.addWidget(trend_card)
+
+        lower_row = QHBoxLayout()
+        lower_row.setSpacing(12)
+
+        ovr_card, ovr_lay = self._dash_card(self.tr("OVERSHOOT vs COST"))
+        self._dash_ovr_plot = pg.PlotWidget()
+        self._dash_ovr_plot.setBackground("#111827" if self.dark else "#f8fafc")
+        self._dash_ovr_plot.showGrid(x=True, y=True, alpha=0.22)
+        self._dash_ovr_plot.setMinimumHeight(230)
+        self._dash_ovr_plot.setMenuEnabled(False)
+        ovr_lay.addWidget(self._dash_ovr_plot)
+        lower_row.addWidget(ovr_card, 2)
+
+        table_view_all = QPushButton(self.tr("View all"))
+        table_view_all.setObjectName("secondaryButton")
+        table_view_all.setFlat(True)
+        table_view_all.clicked.connect(lambda: self._nav_to(1))
+        table_card, table_lay = self._dash_card(self.tr("Recent Runs"), header_extra=table_view_all)
+        self._dash_table = QTableWidget()
+        self._dash_table.setAlternatingRowColors(True)
+        self._dash_table.setShowGrid(False)
+        self._dash_table.setWordWrap(False)
+        self._dash_table.verticalHeader().setVisible(False)
+        self._dash_table.horizontalHeader().setStretchLastSection(True)
+        self._dash_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._dash_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._dash_table.setMinimumHeight(240)
+        self._dash_table.itemDoubleClicked.connect(self._dash_open_row)
+        table_lay.addWidget(self._dash_table)
+        pager_row = QHBoxLayout()
+        self._dash_pager_label = QLabel("")
+        self._dash_pager_label.setStyleSheet(
+            "color: #94a3b8; font-size: 9.5pt; background: transparent;"
+        )
+        pager_row.addWidget(self._dash_pager_label)
+        pager_row.addStretch(1)
+        self._dash_prev_btn = QPushButton("‹")
+        self._dash_prev_btn.setFixedSize(28, 26)
+        self._dash_prev_btn.clicked.connect(lambda: self._dash_change_page(-1))
+        self._dash_page_label = QLabel("")
+        self._dash_page_label.setStyleSheet("background: transparent;")
+        self._dash_next_btn = QPushButton("›")
+        self._dash_next_btn.setFixedSize(28, 26)
+        self._dash_next_btn.clicked.connect(lambda: self._dash_change_page(1))
+        pager_row.addWidget(self._dash_prev_btn)
+        pager_row.addWidget(self._dash_page_label)
+        pager_row.addWidget(self._dash_next_btn)
+        table_lay.addLayout(pager_row)
+        lower_row.addWidget(table_card, 3)
+
+        left_col.addLayout(lower_row)
+        main_row.addLayout(left_col, 3)
+
+        right_col = QVBoxLayout()
+        right_col.setSpacing(12)
+        right_col.setContentsMargins(0, 0, 0, 0)
+
+        insights_card, self._dash_insights_lay = self._dash_card(self.tr("Insights"))
+        right_col.addWidget(insights_card)
+
+        worst_view_all = QPushButton(self.tr("View all"))
+        worst_view_all.setObjectName("secondaryButton")
+        worst_view_all.setFlat(True)
+        worst_view_all.clicked.connect(lambda: self._nav_to(1))
+        worst_card, worst_lay = self._dash_card(
+            self.tr("Worst Runs (By Cost)"), header_extra=worst_view_all
+        )
+        self._dash_worst_list = QListWidget()
+        self._dash_worst_list.setMaximumHeight(160)
+        self._dash_worst_list.itemDoubleClicked.connect(
+            lambda item: self._dash_open_key(item.data(Qt.UserRole))
+        )
+        worst_lay.addWidget(self._dash_worst_list)
+        right_col.addWidget(worst_card)
+
+        actions_card, actions_lay = self._dash_card(self.tr("Quick Actions"))
+        for label, icon_name, slot in [
+            (self.tr("Compare Runs"), "layout-split", lambda: self._nav_to(1)),
+            (self.tr("Export Data"), "download", self._dash_export_csv),
+            (self.tr("View Reports"), "file-earmark", lambda: self._nav_to(4)),
+        ]:
+            btn = QPushButton(f"  {label}")
+            btn.setIcon(_svg_icon(icon_name, "#94a3b8", 15))
+            btn.clicked.connect(slot)
+            actions_lay.addWidget(btn)
+        right_col.addWidget(actions_card)
+
+        missing_card, missing_lay = self._dash_card(self.tr("Missing Reports"))
+        missing_row = QHBoxLayout()
+        self._dash_missing_count_lbl = QLabel("0")
+        self._dash_missing_count_lbl.setStyleSheet(
+            "font-size: 26px; font-weight: 800; background: transparent;"
+        )
+        missing_row.addWidget(self._dash_missing_count_lbl)
+        missing_desc = QLabel(self.tr("run(s) are missing performance reports."))
+        missing_desc.setWordWrap(True)
+        missing_desc.setStyleSheet("color: #94a3b8; font-size: 9.5pt; background: transparent;")
+        missing_row.addWidget(missing_desc, 1)
+        missing_lay.addLayout(missing_row)
+        missing_open_btn = QPushButton(self.tr("Open"))
+        missing_open_btn.clicked.connect(lambda: self._nav_to(4))
+        missing_lay.addWidget(missing_open_btn)
+        right_col.addWidget(missing_card)
+
+        right_col.addStretch(1)
+        main_row.addLayout(right_col, 1)
+
+        root.addLayout(main_row, 1)
+
+        # -- footer ------------------------------------------------------
+        footer_row = QHBoxLayout()
+        self._dash_updated_lbl = QLabel("")
+        self._dash_updated_lbl.setStyleSheet(
+            "color: #64748b; font-size: 9pt; background: transparent;"
+        )
+        footer_row.addWidget(self._dash_updated_lbl)
+        footer_row.addStretch(1)
+        version_lbl = QLabel(self._dash_app_version())
+        version_lbl.setStyleSheet("color: #64748b; font-size: 9pt; background: transparent;")
+        footer_row.addWidget(version_lbl)
+        root.addLayout(footer_row)
+
+        self._dash_page = 0
+        self._dash_range_days = 30
+        self._dash_range_btns[30].setChecked(True)
+        self._dash_last_refreshed = None
         return scroll
+
+    def _dash_app_version(self):
+        try:
+            from importlib.metadata import version
+
+            return f"v{version('deepvac-insight')}"
+        except Exception:
+            return ""
+
+    # ── filtering ─────────────────────────────────────────────────────────
+
+    def _dash_range_filtered(self):
+        """Runs within the selected date range -- drives stats, charts,
+        insights, and the worst-runs list. Status/search apply only to the
+        table itself (see _dash_table_filtered), same split reports.py
+        already uses between its stat tiles and its table."""
+        runs = self.runs
+        days = getattr(self, "_dash_range_days", None)
+        if days is None:
+            return runs
+        parsed = [(r, _parse_start_time(r.get("start_time"))) for r in runs]
+        known = [(r, t) for r, t in parsed if t is not None]
+        if not known:
+            return runs
+        end = max(t for _, t in known)
+        start = end - timedelta(days=days)
+        return [r for r, t in known if start <= t <= end]
+
+    def _dash_prev_period(self):
+        days = getattr(self, "_dash_range_days", None)
+        if days is None:
+            return None
+        parsed = [(r, _parse_start_time(r.get("start_time"))) for r in self.runs]
+        known = [(r, t) for r, t in parsed if t is not None]
+        if not known:
+            return None
+        end = max(t for _, t in known)
+        current_start = end - timedelta(days=days)
+        prev_start = current_start - timedelta(days=days)
+        return [r for r, t in known if prev_start <= t < current_start]
+
+    def _dash_table_filtered(self):
+        rows = self._dash_range_filtered()
+        status = (
+            self._dash_status_combo.currentData() if hasattr(self, "_dash_status_combo") else "All"
+        )
+        if status and status != "All":
+            rows = [r for r in rows if _run_status(r) == status]
+        query = self._dash_search.text().strip().lower() if hasattr(self, "_dash_search") else ""
+        if query:
+            rows = [r for r in rows if query in str(r.get("id", "")).lower()]
+        return sorted(
+            rows,
+            key=lambda r: (
+                _parse_start_time(r.get("start_time")) or datetime.min.replace(tzinfo=timezone.utc)
+            ),
+            reverse=True,
+        )
+
+    # ── controls ──────────────────────────────────────────────────────────
+
+    def _dash_set_range(self, days):
+        self._dash_range_days = days
+        for d, btn in self._dash_range_btns.items():
+            btn.setChecked(d == days)
+        idx = next((i for i, (_, d) in enumerate(_DASH_RANGES) if d == days), 1)
+        self._dash_range_combo.blockSignals(True)
+        self._dash_range_combo.setCurrentIndex(idx)
+        self._dash_range_combo.blockSignals(False)
+        self._dash_page = 0
+        self._refresh_dashboard()
+
+    def _dash_on_range_combo_changed(self):
+        self._dash_set_range(self._dash_range_combo.currentData())
+
+    def _dash_change_page(self, delta):
+        self._dash_page = max(0, self._dash_page + delta)
+        self._dash_refresh_table()
+
+    def _dash_open_key(self, key):
+        if not key:
+            return
+        self._open_run(key)
+        self._nav_to(2)
+
+    def _dash_open_row(self, item):
+        key = self._dash_table.item(item.row(), 0).data(Qt.UserRole)
+        self._dash_open_key(key)
+
+    def _dash_export_csv(self):
+        import csv
+
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        rows = self._dash_table_filtered()
+        if not rows:
+            QMessageBox.information(self, self.tr("Export"), self.tr("Nothing to export."))
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, self.tr("Export dashboard runs"), "dashboard-runs.csv", self.tr("CSV (*.csv)")
+        )
+        if not path:
+            return
+        fields = ["id", "group", "status", "cost", "tail_mae", "overshoot", "start_time"]
+        try:
+            with open(path, "w", newline="", encoding="utf-8") as fh:
+                writer = csv.writer(fh)
+                writer.writerow(fields)
+                for r in rows:
+                    writer.writerow(
+                        [
+                            r.get("id"),
+                            r.get("group"),
+                            _run_status(r),
+                            r.get("cost"),
+                            r.get("tail_mae"),
+                            r.get("overshoot"),
+                            r.get("start_time"),
+                        ]
+                    )
+        except OSError as exc:
+            QMessageBox.critical(self, self.tr("Export failed"), str(exc))
+            return
+        QMessageBox.information(
+            self, self.tr("Export complete"), self.tr("Saved to {0}").format(path)
+        )
+
+    # ── refresh ───────────────────────────────────────────────────────────
 
     def _refresh_dashboard(self):
         while self._dash_stats_row.count():
@@ -70,46 +494,192 @@ class DashboardMixin:
             if w:
                 w.deleteLater()
 
+        self._dash_last_refreshed = datetime.now(timezone.utc)
+        self._dash_updated_lbl.setText(
+            self.tr("Data updated: {0}").format(_time_ago(self._dash_last_refreshed))
+        )
+
         if not self.runs:
+            self._dash_refresh_table()
+            self._draw_dashboard_charts()
+            self._dash_refresh_insights()
+            self._dash_refresh_worst_runs()
             return
 
-        maes = [r["tail_mae"] for r in self.runs if r.get("tail_mae") is not None]
-        best = min(self.runs, key=lambda r: r.get("tail_mae") or float("inf"))
+        current = self._dash_range_filtered()
+        previous = self._dash_prev_period()
 
-        for lbl, val in [
-            (self.tr("Total Runs"), str(len(self.runs))),
-            (self.tr("Avg Tail MAE"), fmt(sum(maes) / len(maes)) if maes else "-"),
-            (self.tr("Best Run"), best["id"]),
-            (self.tr("Best MAE"), fmt(best.get("mae"))),
-            (self.tr("Best Tail MAE"), fmt(best.get("tail_mae"))),
-            (self.tr("Best Overshoot"), fmt(best.get("overshoot"))),
-        ]:
-            box = QFrame()
-            box.setObjectName("card")
-            bl = QVBoxLayout(box)
-            bl.setContentsMargins(16, 12, 16, 12)
-            bl.setSpacing(4)
-            cap = QLabel(lbl)
-            cap.setObjectName("sectionLabel")
-            bl.addWidget(cap)
-            num = QLabel(val)
-            num.setStyleSheet("font-size: 20px; font-weight: 800; background: transparent;")
-            bl.addWidget(num)
-            self._dash_stats_row.addWidget(box)
+        maes = [r["tail_mae"] for r in current if r.get("tail_mae") is not None]
+        overshoots = [r["overshoot"] for r in current if r.get("overshoot") is not None]
+        best = (
+            min(
+                current,
+                key=lambda r: r.get("tail_mae") if r.get("tail_mae") is not None else float("inf"),
+            )
+            if current
+            else None
+        )
+
+        def _delta(metric_fn, lower_is_better):
+            if previous is None:
+                return None
+            cur_vals = metric_fn(current)
+            prev_vals = metric_fn(previous)
+            if not prev_vals or not cur_vals:
+                return None
+            cur_v, prev_v = sum(cur_vals) / len(cur_vals), sum(prev_vals) / len(prev_vals)
+            if prev_v == 0:
+                return None
+            pct = (cur_v - prev_v) / abs(prev_v) * 100
+            good = (pct < 0) if lower_is_better else (pct > 0)
+            arrow = "↓" if pct < 0 else "↑"
+            color = "#22c55e" if good else "#ef4444"
+            return f'<span style="color:{color}">{arrow} {abs(pct):.1f}%</span> vs prev {self._dash_range_btn_label()}'
+
+        tiles = [
+            (
+                "database",
+                self.tr("Total Runs"),
+                str(len(current)),
+                _delta(lambda rs: [len(rs)], False),
+            ),
+            (
+                "activity",
+                self.tr("Avg Tail MAE"),
+                fmt(sum(maes) / len(maes)) if maes else "-",
+                _delta(
+                    lambda rs: [r["tail_mae"] for r in rs if r.get("tail_mae") is not None], True
+                ),
+            ),
+            (
+                "check-circle",
+                self.tr("Best Tail MAE"),
+                fmt(min(maes)) if maes else "-",
+                _delta(
+                    lambda rs: (
+                        [
+                            min(
+                                [r["tail_mae"] for r in rs if r.get("tail_mae") is not None],
+                                default=None,
+                            )
+                        ]
+                        if any(r.get("tail_mae") is not None for r in rs)
+                        else []
+                    ),
+                    True,
+                ),
+            ),
+            (
+                "graph-up",
+                self.tr("Best Overshoot"),
+                fmt(min(overshoots)) if overshoots else "-",
+                _delta(
+                    lambda rs: (
+                        [
+                            min(
+                                [r["overshoot"] for r in rs if r.get("overshoot") is not None],
+                                default=None,
+                            )
+                        ]
+                        if any(r.get("overshoot") is not None for r in rs)
+                        else []
+                    ),
+                    True,
+                ),
+            ),
+        ]
+        for icon_name, label, val, delta_html in tiles:
+            self._dash_stats_row.addWidget(self._dash_stat_tile(icon_name, label, val, delta_html))
+
+        best_sub = None
+        if best is not None:
+            best_sub = (best.get("start_time") or "").split(" ")[0] or None
+        self._dash_stats_row.addWidget(
+            self._dash_stat_tile(
+                "window-stack",
+                self.tr("Best Run"),
+                best["id"] if best else "-",
+                best_sub,
+                elide=True,
+            )
+        )
+
+        online = getattr(self, "_chamber_connected", False)
+        if online:
+            chamber_val, chamber_sub, chamber_color = self.tr("Online"), self.tr("Live"), "#22c55e"
+        else:
+            seen = _time_ago(getattr(self, "_chamber_last_seen", None))
+            chamber_val = self.tr("Offline")
+            chamber_sub = (
+                self.tr("Last seen: {0}").format(seen) if seen else self.tr("Never connected")
+            )
+            chamber_color = "#ef4444"
+        self._dash_stats_row.addWidget(
+            self._dash_stat_tile(
+                "broadcast",
+                self.tr("Chamber Status"),
+                chamber_val,
+                chamber_sub,
+                value_color=chamber_color,
+            )
+        )
         self._dash_stats_row.addStretch(1)
 
         self._draw_dashboard_charts()
+        self._dash_refresh_table()
+        self._dash_refresh_insights()
+        self._dash_refresh_worst_runs()
+
+    def _dash_range_btn_label(self):
+        days = getattr(self, "_dash_range_days", None)
+        return next((lbl for lbl, d in _DASH_RANGES if d == days), "period")
+
+    def _dash_stat_tile(self, icon_name, label, val, sub=None, value_color=None, elide=False):
+        box = QFrame()
+        box.setObjectName("card")
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(14, 10, 14, 10)
+        bl.setSpacing(4)
+        cap_row = QHBoxLayout()
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(_svg_icon(icon_name, "#60a5fa", 16).pixmap(16, 16))
+        cap_row.addWidget(icon_lbl)
+        cap = QLabel(label)
+        cap.setObjectName("sectionLabel")
+        cap_row.addWidget(cap)
+        cap_row.addStretch(1)
+        bl.addLayout(cap_row)
+        text = str(val)
+        if elide and len(text) > 20:
+            text = text[:18] + "…"
+        num = QLabel(text)
+        color = value_color or "#f8fafc" if self.dark else (value_color or "#0f172a")
+        num.setStyleSheet(
+            f"font-size: 18px; font-weight: 800; background: transparent; color: {color};"
+        )
+        num.setToolTip(str(val))
+        bl.addWidget(num)
+        if sub:
+            sub_lbl = QLabel()
+            sub_lbl.setTextFormat(Qt.RichText)
+            sub_lbl.setText(sub)
+            sub_lbl.setStyleSheet("font-size: 9pt; background: transparent; color: #94a3b8;")
+            bl.addWidget(sub_lbl)
+        return box
 
     def _draw_dashboard_charts(self):
-        import numpy as np
-
         self._dash_cost_plot.clear()
-        self._dash_mae_plot.clear()
         self._dash_ovr_plot.clear()
-        if not self.runs:
+        rows = self._dash_range_filtered()
+        if not rows:
             return
 
-        ordered = list(reversed(self.runs))
+        ordered = sorted(
+            rows,
+            key=lambda r: (
+                _parse_start_time(r.get("start_time")) or datetime.min.replace(tzinfo=timezone.utc)
+            ),
+        )
         xs = list(range(len(ordered)))
         costs = [
             (x, r["cost"]) for x, r in zip(xs, ordered, strict=False) if r.get("cost") is not None
@@ -128,21 +698,9 @@ class DashboardMixin:
         self._dash_cost_plot.setLabel("bottom", self.tr("Run (oldest → newest)"))
         self._dash_cost_plot.setLabel("left", self.tr("Cost"))
 
-        maes = [r["tail_mae"] for r in self.runs if r.get("tail_mae") is not None]
-        if maes:
-            bins = min(25, max(5, len(maes) // 4))
-            y, x = np.histogram(maes, bins=bins)
-            w = (x[1] - x[0]) * 0.85 if len(x) > 1 else 1.0
-            bar = pg.BarGraphItem(
-                x=x[:-1], height=y, width=w, brush="#51d6c7", pen=pg.mkPen("#111827", width=0.5)
-            )
-            self._dash_mae_plot.addItem(bar)
-        self._dash_mae_plot.setLabel("bottom", self.tr("Tail MAE"))
-        self._dash_mae_plot.setLabel("left", self.tr("Count"))
-
         pairs = [
             (r["cost"], r["overshoot"])
-            for r in self.runs
+            for r in rows
             if r.get("cost") is not None and r.get("overshoot") is not None
         ]
         if pairs:
@@ -157,3 +715,220 @@ class DashboardMixin:
             self._dash_ovr_plot.addItem(scatter)
         self._dash_ovr_plot.setLabel("bottom", self.tr("Cost"))
         self._dash_ovr_plot.setLabel("left", self.tr("Overshoot"))
+
+    def _dash_refresh_table(self):
+        if not hasattr(self, "_dash_table"):
+            return
+        rows = self._dash_table_filtered()
+        total = len(rows)
+        pages = max(1, (total + _DASH_PAGE_SIZE - 1) // _DASH_PAGE_SIZE)
+        self._dash_page = min(self._dash_page, pages - 1)
+        start = self._dash_page * _DASH_PAGE_SIZE
+        page_rows = rows[start : start + _DASH_PAGE_SIZE]
+
+        cols = [
+            self.tr("Run ID"),
+            self.tr("Group"),
+            self.tr("Status"),
+            self.tr("Cost"),
+            self.tr("Tail MAE"),
+            self.tr("Overshoot"),
+            self.tr("Date"),
+        ]
+        # Display text is translated; the dict's own keys stay the stable
+        # English values _run_status() returns, same convention reports.py
+        # uses for its Ready/Missing status labels.
+        status_labels = {
+            "Completed": self.tr("Completed"),
+            "Warning": self.tr("Warning"),
+            "Anomaly": self.tr("Anomaly"),
+        }
+        table = self._dash_table
+        table.setUpdatesEnabled(False)
+        # clearContents() (not just setRowCount()) is what actually removes
+        # previously-set cell widgets -- the Status column's badges are
+        # QWidgets via setCellWidget(), and re-running this with the same
+        # row count would otherwise leave stale badges behind, overlapping
+        # the freshly-set ones.
+        table.clearContents()
+        table.setColumnCount(len(cols))
+        table.setRowCount(len(page_rows))
+        table.setHorizontalHeaderLabels(cols)
+        for ri, r in enumerate(page_rows):
+            status = _run_status(r)
+            date_str = (r.get("start_time") or "-").split(" ")[
+                0
+            ]  # just the date; the full "YYYY-MM-DD HH:MM:SS UTC" doesn't fit the column
+            values = [
+                r.get("id", ""),
+                r.get("group", "-"),
+                None,
+                fmt(r.get("cost")),
+                fmt(r.get("tail_mae")),
+                fmt(r.get("overshoot")),
+                date_str,
+            ]
+            for ci, v in enumerate(values):
+                if ci == 2:
+                    badge = QLabel(status_labels.get(status, status))
+                    badge.setObjectName(f"status{status}")
+                    badge.setAlignment(Qt.AlignCenter)
+                    badge.setMinimumWidth(78)
+                    wrap = QWidget()
+                    wl = QHBoxLayout(wrap)
+                    wl.setContentsMargins(4, 2, 4, 2)
+                    wl.addWidget(badge)
+                    wl.addStretch(1)
+                    table.setCellWidget(ri, ci, wrap)
+                    item = QTableWidgetItem("")
+                else:
+                    item = QTableWidgetItem(str(v))
+                if ci == 0:
+                    item.setData(Qt.UserRole, r["key"])
+                table.setItem(ri, ci, item)
+        table.resizeColumnsToContents()
+        # resizeColumnsToContents() only measures QTableWidgetItem text, not
+        # the cell widgets set via setCellWidget() above -- the Status
+        # column's item text is empty, so without this it shrinks to the
+        # header width and clips the status badge.
+        table.setColumnWidth(2, 96)
+        table.setUpdatesEnabled(True)
+
+        shown_from = 0 if total == 0 else start + 1
+        shown_to = min(start + _DASH_PAGE_SIZE, total)
+        self._dash_pager_label.setText(
+            self.tr("Showing {0} to {1} of {2} runs").format(shown_from, shown_to, total)
+        )
+        self._dash_page_label.setText(f"{self._dash_page + 1} / {pages}")
+        self._dash_prev_btn.setEnabled(self._dash_page > 0)
+        self._dash_next_btn.setEnabled(self._dash_page + 1 < pages)
+
+    def _dash_refresh_worst_runs(self):
+        self._dash_worst_list.clear()
+        rows = [r for r in self._dash_range_filtered() if r.get("cost") is not None]
+        worst = sorted(rows, key=lambda r: r["cost"], reverse=True)[:3]
+        for i, r in enumerate(worst, start=1):
+            item = QListWidgetItem(f"{i}.  {r['id']}   —   cost {fmt(r['cost'])}")
+            item.setData(Qt.UserRole, r["key"])
+            self._dash_worst_list.addItem(item)
+        if not worst:
+            self._dash_worst_list.addItem(self.tr("No runs in this range."))
+
+    def _dash_clear_insights(self):
+        while self._dash_insights_lay.count() > 1:  # keep the header row
+            item = self._dash_insights_lay.takeAt(1)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+    def _dash_insight_row(
+        self, icon_name, icon_color, title, desc, action_label=None, action_slot=None
+    ):
+        row = QFrame()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 4, 0, 4)
+        rl.setSpacing(10)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(_svg_icon(icon_name, icon_color, 16).pixmap(16, 16))
+        icon_lbl.setFixedWidth(20)
+        rl.addWidget(icon_lbl)
+        text_col = QVBoxLayout()
+        text_col.setSpacing(1)
+        t = QLabel(title)
+        t.setStyleSheet("font-weight: 700; font-size: 10pt; background: transparent;")
+        text_col.addWidget(t)
+        d = QLabel(desc)
+        d.setWordWrap(True)
+        d.setStyleSheet("color: #94a3b8; font-size: 9pt; background: transparent;")
+        text_col.addWidget(d)
+        rl.addLayout(text_col, 1)
+        if action_label and action_slot:
+            btn = QPushButton(action_label)
+            btn.setFixedHeight(26)
+            btn.clicked.connect(action_slot)
+            rl.addWidget(btn)
+        return row
+
+    def _dash_refresh_insights(self):
+        self._dash_clear_insights()
+        rows = self._dash_range_filtered()
+
+        flagged = [r for r in rows if r.get("quality_errors") or r.get("quality_warnings")]
+        error_count = sum(1 for r in rows if r.get("quality_errors"))
+        if flagged:
+            self._dash_insights_lay.addWidget(
+                self._dash_insight_row(
+                    "bell",
+                    "#f2bd52",
+                    self.tr("Data Quality Issues"),
+                    self.tr("{0} run(s) have data-quality warnings or errors.").format(
+                        len(flagged)
+                    ),
+                    self.tr("Review"),
+                    lambda: self._dash_set_status_filter("Anomaly" if error_count else "Warning"),
+                )
+            )
+
+        missing = [r for r in rows if not _has_report(r)]
+        if missing:
+            self._dash_insights_lay.addWidget(
+                self._dash_insight_row(
+                    "file-earmark",
+                    "#f2bd52",
+                    self.tr("Missing Reports"),
+                    self.tr("{0} run(s) are missing performance reports.").format(len(missing)),
+                    self.tr("Investigate"),
+                    lambda: self._nav_to(4),
+                )
+            )
+        self._dash_missing_count_lbl.setText(str(len(missing)))
+
+        alert_row = self._dash_recent_alert_row()
+        self._dash_insights_lay.addWidget(alert_row)
+
+        if not flagged and not missing:
+            self._dash_insights_lay.addWidget(
+                self._dash_insight_row(
+                    "check-circle",
+                    "#22c55e",
+                    self.tr("All clear"),
+                    self.tr("No data-quality issues or missing reports in this range."),
+                )
+            )
+
+    def _dash_recent_alert_row(self):
+        try:
+            events = alarms_service.list_events(limit=50)
+            unacked = next((e for e in events if not e.get("acknowledged_at")), None)
+        except Exception:
+            unacked = None
+        if unacked:
+            when = self.tr("still active") if not unacked.get("cleared_at") else self.tr("cleared")
+            return self._dash_insight_row(
+                "bell",
+                "#ef4444",
+                self.tr("Recent Alerts"),
+                self.tr("{0} ({1}, {2}) is unacknowledged.").format(
+                    unacked["rule_name"], unacked["severity"], when
+                ),
+                self.tr("Details"),
+                self._dash_open_alarm_history,
+            )
+        return self._dash_insight_row(
+            "check-circle",
+            "#22c55e",
+            self.tr("Recent Alerts"),
+            self.tr("No unacknowledged alarms."),
+        )
+
+    def _dash_open_alarm_history(self):
+        from app.alarm_history_dialog import AlarmHistoryDialog
+
+        dlg = AlarmHistoryDialog(current_user=self.current_user, parent=self)
+        dlg.exec()
+
+    def _dash_set_status_filter(self, status):
+        idx = self._dash_status_combo.findData(status)
+        if idx >= 0:
+            self._dash_status_combo.setCurrentIndex(idx)
+        self._nav_to(1)
