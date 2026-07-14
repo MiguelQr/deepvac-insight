@@ -1,4 +1,10 @@
-"""MonitoringMixin — builds the Live Monitoring page and alarm management."""
+"""MonitoringMixin — builds the Live Monitoring page and alarm management.
+
+Test Profiles (multi-step setpoint schedules run against the chamber this
+page connects) live on the separate Controller page -- see
+views/controller.py -- not here; this module only owns the connection
+itself (self.tcp) and the alarm/session-recording features built directly
+on top of it."""
 
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
@@ -11,8 +17,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -20,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 import app.services.alarms_service as alarms_service
+import app.services.chambers_service as chambers_service
 import app.services.data_service as data
 from app.common import COLORS, fmt
 
@@ -77,17 +84,19 @@ class MonitoringMixin:
         self._mon_protocol = QComboBox()
         self._mon_protocol.addItems(["TCP / IP"])
 
-        host_row = QWidget()
-        host_lay = QHBoxLayout(host_row)
-        host_lay.setContentsMargins(0, 0, 0, 0)
-        host_lay.setSpacing(4)
-        self._mon_host = QLineEdit("127.0.0.1")
-        self._mon_port = QSpinBox()
-        self._mon_port.setRange(1, 65535)
-        self._mon_port.setValue(5555)
-        self._mon_port.setFixedWidth(68)
-        host_lay.addWidget(self._mon_host)
-        host_lay.addWidget(self._mon_port)
+        chamber_row = QWidget()
+        chamber_lay = QHBoxLayout(chamber_row)
+        chamber_lay.setContentsMargins(0, 0, 0, 0)
+        chamber_lay.setSpacing(4)
+        self._mon_chamber_combo = QComboBox()
+        self._mon_chamber_combo.setToolTip(self.tr("Which saved chamber to connect to."))
+        chamber_lay.addWidget(self._mon_chamber_combo, 1)
+        manage_chambers_btn = QPushButton("…")
+        manage_chambers_btn.setFixedWidth(26)
+        manage_chambers_btn.setToolTip(self.tr("Manage saved chambers…"))
+        manage_chambers_btn.clicked.connect(self._open_chambers_dialog)
+        chamber_lay.addWidget(manage_chambers_btn)
+        self._load_chamber_choices()
 
         self._mon_interval = QComboBox()
         self._mon_interval.addItems(["250 ms", "500 ms", "1 s", "2 s", "5 s"])
@@ -102,7 +111,7 @@ class MonitoringMixin:
         for row_idx, (cap, w) in enumerate(
             [
                 (self.tr("Protocol"), self._mon_protocol),
-                (self.tr("Host / Port"), host_row),
+                (self.tr("Chamber"), chamber_row),
                 (self.tr("Poll interval"), self._mon_interval),
             ]
         ):
@@ -193,6 +202,8 @@ class MonitoringMixin:
         self._mon_user_disconnected = False
         self._mon_reconnect_attempts = 0
         self._mon_reconnect_timer = None
+        self._active_chamber = None  # the chamber dict currently connected, if any
+        self._session_test_profile_name = None  # last test profile run this session, if any
 
         # ── Alarms ───────────────────────────────────────────────────────────
         alarms_card = QFrame()
@@ -335,36 +346,87 @@ class MonitoringMixin:
 
     # ── Connection ───────────────────────────────────────────────────────────
 
+    def _load_chamber_choices(self):
+        previous = (
+            self._mon_chamber_combo.currentData() if self._mon_chamber_combo.count() else None
+        )
+        self._mon_chamber_combo.blockSignals(True)
+        self._mon_chamber_combo.clear()
+        try:
+            chambers = chambers_service.list_chambers()
+        except Exception:
+            chambers = []
+        for chamber in chambers:
+            self._mon_chamber_combo.addItem(
+                f"{chamber['name']}  ({chamber['host']}:{chamber['port']})", chamber
+            )
+        if previous is not None:
+            idx = next(
+                (
+                    i
+                    for i in range(self._mon_chamber_combo.count())
+                    if self._mon_chamber_combo.itemData(i)["id"] == previous["id"]
+                ),
+                0,
+            )
+            self._mon_chamber_combo.setCurrentIndex(idx)
+        self._mon_chamber_combo.blockSignals(False)
+
+    def _open_chambers_dialog(self):
+        from app.chambers_dialog import ChambersDialog
+
+        dlg = ChambersDialog(parent=self)
+        dlg.exec()
+        if dlg.changed:
+            self._load_chamber_choices()
+
     def _on_mon_connect(self):
         if self.tcp.is_connected():
             self._mon_user_disconnected = True  # don't auto-reconnect after this
             self.tcp.disconnect_from_host()
             return
+        chamber = self._mon_chamber_combo.currentData()
+        if not chamber:
+            QMessageBox.warning(
+                self,
+                self.tr("Connect"),
+                self.tr("Add a chamber first (click … next to the Chamber field)."),
+            )
+            return
+        self._active_chamber = chamber
         self._mon_user_disconnected = False
         self._mon_reconnect_attempts = 0
         self._mon_buffer = []
+        self._session_test_profile_name = None
         self._mon_curves = {}
         self._mon_plot_widget.clear()
         self._mon_plot_widget.addLegend()
+        self._mon_chamber_combo.setEnabled(False)
         self._connect_to_host()
 
     def _connect_to_host(self):
-        host = self._mon_host.text().strip() or "127.0.0.1"
-        port = self._mon_port.value()
+        chamber = self._active_chamber
         self._mon_connect_btn.setEnabled(False)
-        self._mon_status_lbl.setText(self.tr("Connecting to {0}:{1}…").format(host, port))
-        self.tcp.connect_to_host(host, port)
+        self._mon_status_lbl.setText(
+            self.tr("Connecting to {0} ({1}:{2})…").format(
+                chamber["name"], chamber["host"], chamber["port"]
+            )
+        )
+        self.tcp.connect_to_host(chamber["host"], chamber["port"])
 
     def _mon_set_connected(self, connected):
         self._mon_connect_btn.setEnabled(True)
         self._mon_connect_btn.setText(self.tr("Disconnect") if connected else self.tr("Connect"))
+        self._mon_chamber_combo.setEnabled(not connected)
         self._mon_dot.setObjectName("chamberIconOn" if connected else "chamberIconOff")
         self._mon_dot.style().unpolish(self._mon_dot)
         self._mon_dot.style().polish(self._mon_dot)
         if connected:
-            host = self._mon_host.text().strip() or "127.0.0.1"
+            chamber = self._active_chamber or {}
             self._mon_status_lbl.setText(
-                self.tr("Online — {0}:{1}").format(host, self._mon_port.value())
+                self.tr("Online — {0} ({1}:{2})").format(
+                    chamber.get("name", "?"), chamber.get("host", "?"), chamber.get("port", "?")
+                )
             )
             self._mon_reconnect_attempts = 0
             self._mon_recording_lbl.setText(self.tr("Recording…"))
@@ -380,7 +442,10 @@ class MonitoringMixin:
                 )
             else:
                 self._mon_recording_lbl.setText(self.tr("Not recording"))
+            if self._test_running_profile is not None:
+                self._test_stop(error=self.tr("chamber disconnected"))
             self._maybe_schedule_reconnect()
+        self._on_test_profile_changed()
         for alarm in self._monitor_alarms:
             alarm["_active"] = False
         self._refresh_alarms_table()
@@ -412,7 +477,7 @@ class MonitoringMixin:
         self._mon_status_lbl.setText(self.tr("Connection error: {0}").format(msg))
 
     def _save_monitoring_session(self):
-        from PySide6.QtWidgets import QInputDialog, QMessageBox
+        from PySide6.QtWidgets import QInputDialog
 
         if not self._mon_buffer:
             return
@@ -422,8 +487,14 @@ class MonitoringMixin:
         )
         if not ok or not name.strip():
             return
+        chamber_name = self._active_chamber["name"] if self._active_chamber else None
         try:
-            result = data.save_monitoring_session(name.strip(), self._mon_buffer)
+            result = data.save_monitoring_session(
+                name.strip(),
+                self._mon_buffer,
+                chamber=chamber_name,
+                test_profile=self._session_test_profile_name,
+            )
         except Exception as exc:
             QMessageBox.critical(self, self.tr("Save session failed"), str(exc))
             return
@@ -432,6 +503,7 @@ class MonitoringMixin:
         self._refresh_dashboard()
         self._refresh_reports()
         self._mon_buffer = []
+        self._session_test_profile_name = None
         self._mon_save_session_btn.setEnabled(False)
         self._mon_recording_lbl.setText(self.tr("Not recording"))
         QMessageBox.information(
@@ -509,8 +581,6 @@ class MonitoringMixin:
         dlg.exec()
 
     def _save_alarm(self):
-        from PySide6.QtWidgets import QMessageBox
-
         name = self._alarm_name_ed.text().strip()
         var = self._alarm_var_combo.currentText().strip()
         cond = self._alarm_cond_combo.currentData()

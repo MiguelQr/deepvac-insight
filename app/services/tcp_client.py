@@ -1,8 +1,19 @@
 """TCP client for a live chamber connection.
 
-Wire protocol: newline-delimited JSON. Each line the server sends is one
-JSON object of variable readings, the same shape as a run_samples.csv row
-(temp, temp_ref, kp, ki, kd, temp_u, temp_u_p, temp_u_i, temp_u_d, ...).
+Inbound wire protocol: newline-delimited JSON. Each line the server sends
+is one JSON object of variable readings, the same shape as a
+run_samples.csv row (temp, temp_ref, kp, ki, kd, temp_u, temp_u_p,
+temp_u_i, temp_u_d, ...).
+
+Outbound wire protocol (send_command(), used by Test Profiles --
+views/monitoring.py's step-sequencer): also newline-delimited JSON, one
+object per command, e.g. {"cmd": "set_point", "temperature": 60.0,
+"pressure": null, "step_index": 0, "step_label": "Ramp to 60C",
+"profile_name": "Soak Test A"}. This is this app's own outbound
+convention; whatever's listening on the other end (a real chamber
+controller or a test double) needs to parse and act on it -- nothing here
+verifies the chamber actually understood or applied a setpoint, only that
+the bytes were written to the socket.
 
 Built on QTcpSocket rather than a raw socket + thread: Qt delivers socket
 events (connected/disconnected/data ready) as signals on the existing Qt
@@ -44,6 +55,17 @@ class ChamberConnection(QObject):
 
     def is_connected(self):
         return self._socket.state() == QAbstractSocket.ConnectedState
+
+    def send_command(self, payload):
+        """Writes one JSON object + newline to the socket -- see this
+        module's docstring for the outbound protocol shape. Raises
+        RuntimeError rather than silently dropping the command if there's
+        no live connection, so a caller (the test-profile step-sequencer)
+        can't mistake a no-op for a sent command."""
+        if not self.is_connected():
+            raise RuntimeError("Cannot send a command: chamber is not connected.")
+        line = json.dumps(payload) + "\n"
+        self._socket.write(line.encode("utf-8"))
 
     def _on_connected(self):
         self.connected.emit()

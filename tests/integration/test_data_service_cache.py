@@ -344,6 +344,32 @@ def test_save_monitoring_session_duplicate_name_gets_suffixed_key(deepvac_data_d
     assert len(data_service.load_cached_runs()) == 2
 
 
+def test_save_monitoring_session_tags_chamber_and_test_profile(deepvac_data_dir):
+    samples = [{"timestamp": "1700000000", "temp": "20.0"}]
+    data_service.save_monitoring_session(
+        "live-test", samples, chamber="Chamber 1", test_profile="Thermal Soak A"
+    )
+    runs = data_service.load_cached_runs()
+    assert runs[0]["chamber"] == "Chamber 1"
+    assert runs[0]["test_profile"] == "Thermal Soak A"
+
+
+def test_save_monitoring_session_without_chamber_or_profile_leaves_them_null(deepvac_data_dir):
+    samples = [{"timestamp": "1700000000", "temp": "20.0"}]
+    data_service.save_monitoring_session("live-test", samples)
+    runs = data_service.load_cached_runs()
+    assert runs[0]["chamber"] is None
+    assert runs[0]["test_profile"] is None
+
+
+def test_folder_sourced_runs_have_no_chamber_or_test_profile(deepvac_data_dir, fake_workspace):
+    _write_run(fake_workspace, "run_a", rows=3)
+    data_service.sync_cache()
+    runs = data_service.load_cached_runs()
+    assert runs[0]["chamber"] is None
+    assert runs[0]["test_profile"] is None
+
+
 def test_save_monitoring_session_is_never_pruned_by_sync_cache(deepvac_data_dir, fake_workspace):
     samples = [{"timestamp": "1700000000", "temp": "20.0"}]
     data_service.save_monitoring_session("live-test", samples)

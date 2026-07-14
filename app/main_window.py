@@ -18,6 +18,7 @@ from app.services.opc_broadcast_server import OpcBroadcastServer
 from app.services.tcp_client import ChamberConnection
 from app.tab_system import EditorArea
 from app.title_bar import TitleBar
+from app.views.controller import ControllerMixin
 from app.views.dashboard import DashboardMixin
 from app.views.monitoring import MonitoringMixin
 from app.views.opc import OpcMixin
@@ -32,6 +33,7 @@ class DeepVacDesktop(
     SimulatorMixin,
     ReportsMixin,
     MonitoringMixin,
+    ControllerMixin,
     OpcMixin,
     QMainWindow,
 ):
@@ -102,6 +104,7 @@ class DeepVacDesktop(
         self.title_bar.set_bell_active(True)
         self._mon_set_connected(True)
         self._opc_set_tcp_connected(True)
+        self._refresh_controller_chamber_status()
 
     def _on_chamber_disconnected(self):
         self._chamber_connected = False
@@ -109,6 +112,7 @@ class DeepVacDesktop(
         self.title_bar.set_bell_active(False)
         self._mon_set_connected(False)
         self._opc_set_tcp_connected(False)
+        self._refresh_controller_chamber_status()
 
     # ── Persisted UI state ───────────────────────────────────────────────────
 
@@ -164,7 +168,8 @@ class DeepVacDesktop(
         self.sim_widget = self._sim_view()  # 3
         self.reports_widget = self._reports_view()  # 4
         self.monitor_widget = self._monitoring_view()  # 5
-        self.opc_widget = self._opc_view()  # 6
+        self.controller_widget = self._controller_view()  # 6
+        self.opc_widget = self._opc_view()  # 7
         for w in [
             self.dashboard_widget,
             self.runs_widget,
@@ -172,6 +177,7 @@ class DeepVacDesktop(
             self.sim_widget,
             self.reports_widget,
             self.monitor_widget,
+            self.controller_widget,
             self.opc_widget,
         ]:
             self.content_stack.addWidget(w)
@@ -207,7 +213,8 @@ class DeepVacDesktop(
             ("act_sim_btn", "cpu", self.tr("Simulator"), 3),
             ("act_reports_btn", "file-earmark", self.tr("Reports"), 4),
             ("act_monitor_btn", "graph-up", self.tr("Monitor"), 5),
-            ("act_opc_btn", "broadcast", self.tr("OPC Server"), 6),
+            ("act_controller_btn", "square", self.tr("Controller"), 6),
+            ("act_opc_btn", "broadcast", self.tr("OPC Server"), 7),
         ]
         self._nav_buttons = []
         for attr, icon_name, label, idx in nav_defs:
@@ -260,6 +267,8 @@ class DeepVacDesktop(
             self._refresh_dashboard()
         elif index == 4:
             self._refresh_reports()
+        elif index == 6:
+            self._load_test_profiles()
 
     # ── Settings ──────────────────────────────────────────────────────────────
 

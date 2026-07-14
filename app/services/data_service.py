@@ -194,6 +194,17 @@ def connect_cache(db_path=None):
         conn.execute("ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'folder'")
     if "quality_json" not in existing_columns:
         conn.execute("ALTER TABLE runs ADD COLUMN quality_json TEXT NOT NULL DEFAULT '[]'")
+    if "chamber" not in existing_columns:
+        # Nullable, no default: only source='monitoring' rows are ever
+        # tagged with the chamber that was connected when they were
+        # recorded (see save_monitoring_session()) -- folder/upload rows
+        # genuinely have no chamber of origin, not an unknown one.
+        conn.execute("ALTER TABLE runs ADD COLUMN chamber TEXT")
+    if "test_profile" not in existing_columns:
+        # Same idea as chamber: whichever Test Profile (services/
+        # test_profiles_service.py) was running when a monitoring session
+        # was saved, if any -- NULL for everything else.
+        conn.execute("ALTER TABLE runs ADD COLUMN test_profile TEXT")
 
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES('cache_version', ?)",
@@ -271,8 +282,8 @@ def sync_cache(progress=None):
                     samples, duration_s, mae, cost, tail_mae, overshoot, settle_time_s,
                     start_time, end_time, columns_json, numeric_columns_json,
                     summary_json, bands_json, annotations_json, samples_json, source,
-                    quality_json, cached_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'folder', ?, datetime('now'))
+                    quality_json, chamber, test_profile, cached_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'folder', ?, NULL, NULL, datetime('now'))
                 """,
                 (
                     record["key"],
@@ -327,7 +338,8 @@ def load_cached_runs():
         rows = conn.execute(
             """
             SELECT key, id, group_name, samples, duration_s, mae, cost, tail_mae,
-                   overshoot, settle_time_s, start_time, end_time, source, quality_json
+                   overshoot, settle_time_s, start_time, end_time, source, quality_json,
+                   chamber, test_profile
             FROM runs
             ORDER BY source_mtime DESC
             """
@@ -352,6 +364,8 @@ def load_cached_runs():
                     "source": row["source"],
                     "quality_errors": errors,
                     "quality_warnings": warnings,
+                    "chamber": row["chamber"],
+                    "test_profile": row["test_profile"],
                 }
             )
         return result
@@ -434,8 +448,8 @@ def upload_runs(paths, progress=None):
                     samples, duration_s, mae, cost, tail_mae, overshoot, settle_time_s,
                     start_time, end_time, columns_json, numeric_columns_json,
                     summary_json, bands_json, annotations_json, samples_json, source,
-                    quality_json, cached_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'upload', ?, datetime('now'))
+                    quality_json, chamber, test_profile, cached_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'upload', ?, NULL, NULL, datetime('now'))
                 """,
                 (
                     record["key"],
@@ -474,12 +488,18 @@ def upload_runs(paths, progress=None):
     return {"imported": imported, "runs": load_cached_runs()}
 
 
-def save_monitoring_session(name, samples):
+def save_monitoring_session(name, samples, chamber=None, test_profile=None):
     """Saves a buffered Live Monitoring session (a list[dict] of samples,
     the same shape as one incoming TCP JSON line each -- see
     tcp_client.ChamberConnection) directly into the run cache as a normal
     run, with its own source='monitoring' tag (never pruned by sync_cache(),
-    same as source='upload' -- see its own comment in sync_cache())."""
+    same as source='upload' -- see its own comment in sync_cache()).
+    chamber: the name of whichever saved chamber (chambers_service) was
+    connected when this session was recorded, if any -- tags the row so
+    the Dashboard's Chamber filter has something real to filter on.
+    test_profile: the name of whichever Test Profile (test_profiles_service)
+    was running when this session was recorded, if any -- same idea, for
+    the Dashboard's Test Profile filter."""
     name = str(name).strip()
     if not name:
         raise ValueError(_tr("Run name cannot be empty."))
@@ -507,9 +527,9 @@ def save_monitoring_session(name, samples):
                 samples, duration_s, mae, cost, tail_mae, overshoot, settle_time_s,
                 start_time, end_time, columns_json, numeric_columns_json,
                 summary_json, bands_json, annotations_json, samples_json, source,
-                quality_json, cached_at
+                quality_json, chamber, test_profile, cached_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?,
-                      'monitoring', ?, datetime('now'))
+                      'monitoring', ?, ?, ?, datetime('now'))
             """,
             (
                 key,
@@ -530,6 +550,8 @@ def save_monitoring_session(name, samples):
                 json.dumps(annotations),
                 json.dumps(samples),
                 json.dumps(quality),
+                chamber,
+                test_profile,
             ),
         )
         conn.commit()
@@ -577,6 +599,8 @@ def cached_run_payload(run_id):
             "settle_time_s": row["settle_time_s"],
             "start_time": row["start_time"],
             "end_time": row["end_time"],
+            "chamber": row["chamber"],
+            "test_profile": row["test_profile"],
         }
         return {
             "run": record,

@@ -3,13 +3,13 @@ expected top-level widget without raising, and re-visiting doesn't grow
 signal-connection counts or attempt a real chamber connection.
 
 Note on "duplicate signal connections": this app's pages (dashboard, runs,
-reports, simulator, monitor, opc) are all built once at DeepVacDesktop
-construction time and live in a QStackedWidget -- _nav_to() only changes
-the visible index, it never reconstructs a page. So the realistic risk
-this check guards against (reconnecting the same signal on every visit)
-doesn't actually exist in this navigation model; the test below confirms
-that's genuinely true (receiver counts stay constant) rather than
-asserting something that can't fail as written.
+reports, simulator, monitor, controller, opc) are all built once at
+DeepVacDesktop construction time and live in a QStackedWidget -- _nav_to()
+only changes the visible index, it never reconstructs a page. So the
+realistic risk this check guards against (reconnecting the same signal on
+every visit) doesn't actually exist in this navigation model; the test
+below confirms that's genuinely true (receiver counts stay constant)
+rather than asserting something that can't fail as written.
 """
 
 import pytest
@@ -27,13 +27,13 @@ def window(deepvac_ui, fake_user, qtbot):
     return win
 
 
-@pytest.mark.parametrize("index", range(7))
+@pytest.mark.parametrize("index", range(8))
 def test_navigate_to_each_page_does_not_raise(window, index):
     window._nav_to(index)
     assert window.content_stack.currentIndex() == index
 
 
-@pytest.mark.parametrize("index", range(7))
+@pytest.mark.parametrize("index", range(8))
 def test_revisiting_a_page_does_not_grow_signal_connections(window, index):
     # QObject.receivers() wants the classic Qt SIGNAL() string form (a
     # leading '2' + the C++ method signature from QMetaMethod), not the
@@ -53,7 +53,7 @@ def test_no_real_chamber_connection_attempted_while_navigating(window):
     # Live Monitoring's connection is only ever opened by an explicit
     # Connect click (app/views/monitoring.py's _on_connect_clicked), never
     # by navigation or construction -- confirmed here rather than assumed.
-    for index in range(7):
+    for index in range(8):
         window._nav_to(index)
     assert window.tcp.is_connected() is False
     assert window.opc_server.is_running() is False
@@ -90,6 +90,12 @@ def test_monitor_page_navigable(window):
     assert window.content_stack.currentIndex() == 5
 
 
-def test_opc_page_navigable(window):
+def test_controller_page_widgets_created(window):
     window._nav_to(6)
-    assert window.content_stack.currentIndex() == 6
+    assert window._test_profile_combo is not None
+    assert window._test_start_btn is not None
+
+
+def test_opc_page_navigable(window):
+    window._nav_to(7)
+    assert window.content_stack.currentIndex() == 7

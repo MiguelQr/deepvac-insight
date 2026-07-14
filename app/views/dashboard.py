@@ -1,16 +1,17 @@
 """DashboardMixin — builds and refreshes the Dashboard page.
 
 Two filtering tiers, matching the convention already used by
-views/reports.py's search+status filter: the Date Range control affects
-everything on the page (stat tiles, charts, insights, worst-runs, the
-table); Status/search only narrow the Recent Runs table itself, so
-looking for one run never blanks out the page's summary numbers.
+views/reports.py's status filter: the Date Range control affects
+everything on the page (stat tiles, charts, insights, best-runs, the
+table); Status only narrows the Recent Runs table itself, so it never
+blanks out the page's summary numbers.
 
-Chamber/Recipe are UI-only placeholders (single "All ..." option each) --
-this app has no multi-chamber registry and no recipe concept anywhere in
-its data model (there is exactly one live TCP chamber connection). Kept
-for layout parity with the mockup rather than removed, same spirit as the
-OPC Server page's own UI-only placeholder fields.
+Chamber and Test Profile are real filters, same tier as Status
+(table-only, not page-wide): both are per-run tags set only on runs saved
+via "Save Session as Run" in Live Monitoring (see
+data_service.save_monitoring_session()'s chamber/test_profile parameters)
+-- folder/upload-sourced runs simply have neither tag, which is correct
+(they didn't come from a chamber connection or a test profile run).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -23,7 +24,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -89,15 +89,6 @@ def _safe_report_filename(run_id):
 class DashboardMixin:
     # ── layout builders ──────────────────────────────────────────────────────
 
-    def _dash_labeled(self, caption, widget):
-        box = QVBoxLayout()
-        box.setSpacing(3)
-        cap = QLabel(caption)
-        cap.setObjectName("sectionLabel")
-        box.addWidget(cap)
-        box.addWidget(widget)
-        return box
-
     def _dash_card(self, title, header_extra=None):
         card = QFrame()
         card.setObjectName("card")
@@ -107,11 +98,18 @@ class DashboardMixin:
         hdr = QHBoxLayout()
         lbl = QLabel(title)
         lbl.setObjectName("sectionLabel")
-        hdr.addWidget(lbl)
+        hdr.addWidget(lbl, 0, Qt.AlignVCenter)
         hdr.addStretch(1)
         if header_extra is not None:
-            hdr.addWidget(header_extra)
-        lay.addLayout(hdr)
+            hdr.addWidget(header_extra, 0, Qt.AlignVCenter)
+        # header row must never stretch to fill leftover card height (that
+        # extra space belongs to the card's main content below) -- without
+        # this, when the card frame gets stretched taller than its natural
+        # size (e.g. to match a taller sibling column), the header row (the
+        # only non-fixed-height item competing for it) absorbs that space
+        # instead, leaving the title/buttons floating in a tall empty strip
+        # above the actual content.
+        lay.addLayout(hdr, 0)
         return card, lay
 
     def _dashboard_view(self):
@@ -122,64 +120,53 @@ class DashboardMixin:
         body = QWidget()
         body.setObjectName("workspaceBody")
         root = QVBoxLayout(body)
-        root.setContentsMargins(24, 24, 24, 24)
+        root.setContentsMargins(24, 16, 24, 24)
         root.setSpacing(16)
         scroll.setWidget(body)
 
-        # -- header ------------------------------------------------------
-        hdr_row = QHBoxLayout()
-        hdr_row.setSpacing(10)
-        title = QLabel(self.tr("Dashboard"))
-        title.setObjectName("pageTitle")
-        hdr_row.addWidget(title)
-        subtitle = QLabel(self.tr("Operational overview of run performance"))
-        subtitle.setStyleSheet("color: #94a3b8; font-size: 11pt; background: transparent;")
-        hdr_row.addWidget(subtitle)
-        hdr_row.addStretch(1)
-        root.addLayout(hdr_row)
+        # -- top row: stat cards (left column) + filters/refresh/export
+        # (right column), single row -- both "columns" share this one row
+        # instead of stacking, to save vertical space.
+        top_row = QHBoxLayout()
+        top_row.setSpacing(16)
 
-        # -- filter bar ----------------------------------------------------
+        self._dash_stats_row = QHBoxLayout()
+        self._dash_stats_row.setSpacing(12)
+        top_row.addLayout(self._dash_stats_row)
+
+        top_row.addStretch(1)
+
         filt_row = QHBoxLayout()
-        filt_row.setSpacing(14)
+        filt_row.setSpacing(8)
 
         self._dash_range_combo = QComboBox()
         for label, days in _DASH_RANGES:
             self._dash_range_combo.addItem(self.tr(label), days)
         self._dash_range_combo.setCurrentIndex(1)  # 30D default
+        self._dash_range_combo.setToolTip(self.tr("Date Range"))
         self._dash_range_combo.currentIndexChanged.connect(self._dash_on_range_combo_changed)
-        filt_row.addLayout(self._dash_labeled(self.tr("Date Range"), self._dash_range_combo))
+        filt_row.addWidget(self._dash_range_combo)
 
-        chamber_combo = QComboBox()
-        chamber_combo.addItem(self.tr("All Chambers"))
-        chamber_combo.setEnabled(False)
-        chamber_combo.setToolTip(
-            self.tr("This build only supports a single live chamber connection.")
-        )
-        filt_row.addLayout(self._dash_labeled(self.tr("Chamber"), chamber_combo))
+        self._dash_chamber_combo = QComboBox()
+        self._dash_chamber_combo.addItem(self.tr("All Chambers"), None)
+        self._dash_chamber_combo.setToolTip(self.tr("Chamber"))
+        self._dash_chamber_combo.currentIndexChanged.connect(self._dash_refresh_table)
+        filt_row.addWidget(self._dash_chamber_combo)
 
-        recipe_combo = QComboBox()
-        recipe_combo.addItem(self.tr("All Recipes"))
-        recipe_combo.setEnabled(False)
-        recipe_combo.setToolTip(self.tr("Recipes are not tracked by this app yet."))
-        filt_row.addLayout(self._dash_labeled(self.tr("Recipe"), recipe_combo))
+        self._dash_profile_combo = QComboBox()
+        self._dash_profile_combo.addItem(self.tr("All Test Profiles"), None)
+        self._dash_profile_combo.setToolTip(self.tr("Test Profile"))
+        self._dash_profile_combo.currentIndexChanged.connect(self._dash_refresh_table)
+        filt_row.addWidget(self._dash_profile_combo)
 
         self._dash_status_combo = QComboBox()
         self._dash_status_combo.addItem(self.tr("All Statuses"), "All")
         self._dash_status_combo.addItem(self.tr("Completed"), "Completed")
         self._dash_status_combo.addItem(self.tr("Warning"), "Warning")
         self._dash_status_combo.addItem(self.tr("Anomaly"), "Anomaly")
+        self._dash_status_combo.setToolTip(self.tr("Status"))
         self._dash_status_combo.currentIndexChanged.connect(self._dash_refresh_table)
-        filt_row.addLayout(self._dash_labeled(self.tr("Status"), self._dash_status_combo))
-
-        filt_row.addStretch(1)
-
-        self._dash_search = QLineEdit()
-        self._dash_search.setObjectName("searchBox")
-        self._dash_search.setPlaceholderText(self.tr("Search run ID…"))
-        self._dash_search.addAction(_svg_icon("search", "#64748b", 13), QLineEdit.LeadingPosition)
-        self._dash_search.setFixedWidth(220)
-        self._dash_search.textChanged.connect(self._dash_refresh_table)
-        filt_row.addWidget(self._dash_search)
+        filt_row.addWidget(self._dash_status_combo)
 
         refresh_btn = QPushButton()
         refresh_btn.setIcon(_svg_icon("arrow-counterclockwise", "#94a3b8", 15))
@@ -188,18 +175,16 @@ class DashboardMixin:
         refresh_btn.clicked.connect(self.load_runs)
         filt_row.addWidget(refresh_btn)
 
-        export_btn = QPushButton(self.tr("Export"))
+        export_btn = QPushButton()
         export_btn.setObjectName("primaryButton")
         export_btn.setIcon(_svg_icon("download", "#ffffff", 14))
+        export_btn.setToolTip(self.tr("Export"))
+        export_btn.setFixedSize(34, 34)
         export_btn.clicked.connect(self._dash_export_csv)
         filt_row.addWidget(export_btn)
 
-        root.addLayout(filt_row)
-
-        # -- stat tiles ------------------------------------------------------
-        self._dash_stats_row = QHBoxLayout()
-        self._dash_stats_row.setSpacing(12)
-        root.addLayout(self._dash_stats_row)
+        top_row.addLayout(filt_row)
+        root.addLayout(top_row)
 
         # -- main body: charts+table (left) / insights (right) --------------
         main_row = QHBoxLayout()
@@ -227,9 +212,10 @@ class DashboardMixin:
         self._dash_cost_plot = pg.PlotWidget()
         self._dash_cost_plot.setBackground("#111827" if self.dark else "#f8fafc")
         self._dash_cost_plot.showGrid(x=True, y=True, alpha=0.22)
-        self._dash_cost_plot.setMinimumHeight(230)
+        self._dash_cost_plot.setMinimumHeight(190)
+        self._dash_cost_plot.setMaximumHeight(260)
         self._dash_cost_plot.setMenuEnabled(False)
-        trend_lay.addWidget(self._dash_cost_plot)
+        trend_lay.addWidget(self._dash_cost_plot, 1)
         left_col.addWidget(trend_card)
 
         lower_row = QHBoxLayout()
@@ -239,9 +225,10 @@ class DashboardMixin:
         self._dash_ovr_plot = pg.PlotWidget()
         self._dash_ovr_plot.setBackground("#111827" if self.dark else "#f8fafc")
         self._dash_ovr_plot.showGrid(x=True, y=True, alpha=0.22)
-        self._dash_ovr_plot.setMinimumHeight(230)
+        self._dash_ovr_plot.setMinimumHeight(190)
+        self._dash_ovr_plot.setMaximumHeight(260)
         self._dash_ovr_plot.setMenuEnabled(False)
-        ovr_lay.addWidget(self._dash_ovr_plot)
+        ovr_lay.addWidget(self._dash_ovr_plot, 1)
         lower_row.addWidget(ovr_card, 2)
 
         table_view_all = QPushButton(self.tr("View all"))
@@ -257,9 +244,10 @@ class DashboardMixin:
         self._dash_table.horizontalHeader().setStretchLastSection(True)
         self._dash_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._dash_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self._dash_table.setMinimumHeight(240)
+        self._dash_table.setMinimumHeight(150)
+        self._dash_table.setMaximumHeight(230)
         self._dash_table.itemDoubleClicked.connect(self._dash_open_row)
-        table_lay.addWidget(self._dash_table)
+        table_lay.addWidget(self._dash_table, 1)
         pager_row = QHBoxLayout()
         self._dash_pager_label = QLabel("")
         self._dash_pager_label.setStyleSheet(
@@ -291,20 +279,20 @@ class DashboardMixin:
         insights_card, self._dash_insights_lay = self._dash_card(self.tr("Insights"))
         right_col.addWidget(insights_card)
 
-        worst_view_all = QPushButton(self.tr("View all"))
-        worst_view_all.setObjectName("secondaryButton")
-        worst_view_all.setFlat(True)
-        worst_view_all.clicked.connect(lambda: self._nav_to(1))
-        worst_card, worst_lay = self._dash_card(
-            self.tr("Worst Runs (By Cost)"), header_extra=worst_view_all
+        best_view_all = QPushButton(self.tr("View all"))
+        best_view_all.setObjectName("secondaryButton")
+        best_view_all.setFlat(True)
+        best_view_all.clicked.connect(lambda: self._nav_to(1))
+        best_card, best_lay = self._dash_card(
+            self.tr("Best Runs (By Cost)"), header_extra=best_view_all
         )
-        self._dash_worst_list = QListWidget()
-        self._dash_worst_list.setMaximumHeight(160)
-        self._dash_worst_list.itemDoubleClicked.connect(
+        self._dash_best_list = QListWidget()
+        self._dash_best_list.setMaximumHeight(160)
+        self._dash_best_list.itemDoubleClicked.connect(
             lambda item: self._dash_open_key(item.data(Qt.UserRole))
         )
-        worst_lay.addWidget(self._dash_worst_list)
-        right_col.addWidget(worst_card)
+        best_lay.addWidget(self._dash_best_list)
+        right_col.addWidget(best_card)
 
         actions_card, actions_lay = self._dash_card(self.tr("Quick Actions"))
         for label, icon_name, slot in [
@@ -371,7 +359,7 @@ class DashboardMixin:
 
     def _dash_range_filtered(self):
         """Runs within the selected date range -- drives stats, charts,
-        insights, and the worst-runs list. Status/search apply only to the
+        insights, and the best-runs list. Status applies only to the
         table itself (see _dash_table_filtered), same split reports.py
         already uses between its stat tiles and its table."""
         runs = self.runs
@@ -406,9 +394,16 @@ class DashboardMixin:
         )
         if status and status != "All":
             rows = [r for r in rows if _run_status(r) == status]
-        query = self._dash_search.text().strip().lower() if hasattr(self, "_dash_search") else ""
-        if query:
-            rows = [r for r in rows if query in str(r.get("id", "")).lower()]
+        chamber = (
+            self._dash_chamber_combo.currentData() if hasattr(self, "_dash_chamber_combo") else None
+        )
+        if chamber:
+            rows = [r for r in rows if r.get("chamber") == chamber]
+        test_profile = (
+            self._dash_profile_combo.currentData() if hasattr(self, "_dash_profile_combo") else None
+        )
+        if test_profile:
+            rows = [r for r in rows if r.get("test_profile") == test_profile]
         return sorted(
             rows,
             key=lambda r: (
@@ -487,6 +482,26 @@ class DashboardMixin:
 
     # ── refresh ───────────────────────────────────────────────────────────
 
+    def _dash_refresh_filter_choices(self):
+        """Repopulates the Chamber/Test Profile combos with whatever
+        distinct values actually appear in self.runs, preserving the
+        current selection if it's still present -- these are dynamic,
+        data-derived filters, unlike Status's fixed set of choices."""
+        for combo, key, all_label in [
+            (self._dash_chamber_combo, "chamber", self.tr("All Chambers")),
+            (self._dash_profile_combo, "test_profile", self.tr("All Test Profiles")),
+        ]:
+            previous = combo.currentData()
+            values = sorted({r[key] for r in self.runs if r.get(key)})
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(all_label, None)
+            for value in values:
+                combo.addItem(value, value)
+            idx = combo.findData(previous) if previous else 0
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+            combo.blockSignals(False)
+
     def _refresh_dashboard(self):
         while self._dash_stats_row.count():
             item = self._dash_stats_row.takeAt(0)
@@ -494,6 +509,7 @@ class DashboardMixin:
             if w:
                 w.deleteLater()
 
+        self._dash_refresh_filter_choices()
         self._dash_last_refreshed = datetime.now(timezone.utc)
         self._dash_updated_lbl.setText(
             self.tr("Data updated: {0}").format(_time_ago(self._dash_last_refreshed))
@@ -503,7 +519,7 @@ class DashboardMixin:
             self._dash_refresh_table()
             self._draw_dashboard_charts()
             self._dash_refresh_insights()
-            self._dash_refresh_worst_runs()
+            self._dash_refresh_best_runs()
             return
 
         current = self._dash_range_filtered()
@@ -534,7 +550,7 @@ class DashboardMixin:
             good = (pct < 0) if lower_is_better else (pct > 0)
             arrow = "↓" if pct < 0 else "↑"
             color = "#22c55e" if good else "#ef4444"
-            return f'<span style="color:{color}">{arrow} {abs(pct):.1f}%</span> vs prev {self._dash_range_btn_label()}'
+            return f'<span style="color:{color}">{arrow} {abs(pct):.1f}%</span>'
 
         tiles = [
             (
@@ -588,8 +604,11 @@ class DashboardMixin:
                 ),
             ),
         ]
+        delta_tooltip = self.tr("vs previous {0}").format(self._dash_range_btn_label())
         for icon_name, label, val, delta_html in tiles:
-            self._dash_stats_row.addWidget(self._dash_stat_tile(icon_name, label, val, delta_html))
+            self._dash_stats_row.addWidget(
+                self._dash_stat_tile(icon_name, label, val, delta_html, tooltip=delta_tooltip)
+            )
 
         best_sub = None
         if best is not None:
@@ -605,14 +624,22 @@ class DashboardMixin:
         )
 
         online = getattr(self, "_chamber_connected", False)
+        active_chamber = getattr(self, "_active_chamber", None)
+        chamber_name = active_chamber["name"] if active_chamber else None
         if online:
-            chamber_val, chamber_sub, chamber_color = self.tr("Online"), self.tr("Live"), "#22c55e"
+            chamber_val = chamber_name or self.tr("Online")
+            chamber_sub, chamber_color = self.tr("Live"), "#22c55e"
         else:
             seen = _time_ago(getattr(self, "_chamber_last_seen", None))
             chamber_val = self.tr("Offline")
-            chamber_sub = (
-                self.tr("Last seen: {0}").format(seen) if seen else self.tr("Never connected")
-            )
+            if seen:
+                chamber_sub = (
+                    self.tr("{0} — last seen: {1}").format(chamber_name, seen)
+                    if chamber_name
+                    else self.tr("Last seen: {0}").format(seen)
+                )
+            else:
+                chamber_sub = self.tr("Never connected")
             chamber_color = "#ef4444"
         self._dash_stats_row.addWidget(
             self._dash_stat_tile(
@@ -628,15 +655,19 @@ class DashboardMixin:
         self._draw_dashboard_charts()
         self._dash_refresh_table()
         self._dash_refresh_insights()
-        self._dash_refresh_worst_runs()
+        self._dash_refresh_best_runs()
 
     def _dash_range_btn_label(self):
         days = getattr(self, "_dash_range_days", None)
         return next((lbl for lbl, d in _DASH_RANGES if d == days), "period")
 
-    def _dash_stat_tile(self, icon_name, label, val, sub=None, value_color=None, elide=False):
+    def _dash_stat_tile(
+        self, icon_name, label, val, sub=None, value_color=None, elide=False, tooltip=None
+    ):
         box = QFrame()
         box.setObjectName("card")
+        if tooltip:
+            box.setToolTip(tooltip)
         bl = QVBoxLayout(box)
         bl.setContentsMargins(14, 10, 14, 10)
         bl.setSpacing(4)
@@ -650,8 +681,8 @@ class DashboardMixin:
         cap_row.addStretch(1)
         bl.addLayout(cap_row)
         text = str(val)
-        if elide and len(text) > 20:
-            text = text[:18] + "…"
+        if elide and len(text) > 13:
+            text = text[:12] + "…"
         num = QLabel(text)
         color = value_color or "#f8fafc" if self.dark else (value_color or "#0f172a")
         num.setStyleSheet(
@@ -803,16 +834,16 @@ class DashboardMixin:
         self._dash_prev_btn.setEnabled(self._dash_page > 0)
         self._dash_next_btn.setEnabled(self._dash_page + 1 < pages)
 
-    def _dash_refresh_worst_runs(self):
-        self._dash_worst_list.clear()
+    def _dash_refresh_best_runs(self):
+        self._dash_best_list.clear()
         rows = [r for r in self._dash_range_filtered() if r.get("cost") is not None]
-        worst = sorted(rows, key=lambda r: r["cost"], reverse=True)[:3]
-        for i, r in enumerate(worst, start=1):
+        best = sorted(rows, key=lambda r: r["cost"])[:3]
+        for i, r in enumerate(best, start=1):
             item = QListWidgetItem(f"{i}.  {r['id']}   —   cost {fmt(r['cost'])}")
             item.setData(Qt.UserRole, r["key"])
-            self._dash_worst_list.addItem(item)
-        if not worst:
-            self._dash_worst_list.addItem(self.tr("No runs in this range."))
+            self._dash_best_list.addItem(item)
+        if not best:
+            self._dash_best_list.addItem(self.tr("No runs in this range."))
 
     def _dash_clear_insights(self):
         while self._dash_insights_lay.count() > 1:  # keep the header row
