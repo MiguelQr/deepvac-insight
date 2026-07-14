@@ -1,10 +1,17 @@
-"""Shared pytest fixtures.
+"""Shared pytest fixtures."""
 
-Qt-specific fixtures (qapp/qtbot setup, QSettings redirection, fake
-services) land in Phase 5.
-"""
+import os
 
-import pytest
+# Must happen before PySide6 is imported anywhere -- including by pytest-qt's
+# own plugin machinery during collection -- so set it here, at module import
+# time, rather than inside a fixture. Overridable: a developer who explicitly
+# exports a different QT_QPA_PLATFORM (e.g. to watch tests run on a real
+# display) is left alone.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest  # noqa: E402
+from PySide6.QtCore import QSettings, QThread  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 
 @pytest.fixture
@@ -57,3 +64,139 @@ def deepvac_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(backup_service, "BACKUPS_DIR", data_dir / "backups")
 
     return data_dir
+
+
+@pytest.fixture
+def qsettings_isolated(tmp_path):
+    """Redirects every QSettings("DeepVac", "Insight") construction (theme,
+    language, window geometry, open tabs, per-run channel selection, the
+    remember-me token, ...) to an INI file under tmp_path instead of the
+    real Windows registry key -- so a test can never read a developer's
+    actual saved settings, nor leave test-written settings behind in the
+    registry after the run. QSettings's format/path are process-global
+    Qt statics (not per-instance), so this is set and restored around the
+    test rather than passed as a constructor argument -- every call site
+    in app/ just does QSettings("DeepVac", "Insight") unchanged.
+    """
+    # QSettings has no getter for the custom search path (only the static
+    # setPath() setter), so there's nothing to save/restore there -- each
+    # test using this fixture points IniFormat at its own tmp_path, which
+    # is only ever consulted while defaultFormat() is IniFormat. Restoring
+    # defaultFormat() back to Native afterward is what actually matters:
+    # it's what makes any *other* code's QSettings("DeepVac", "Insight")
+    # call go back to the real registry once this fixture's test ends.
+    previous_format = QSettings.defaultFormat()
+
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    yield tmp_path
+
+    QSettings("DeepVac", "Insight").clear()
+    QSettings.setDefaultFormat(previous_format)
+
+
+@pytest.fixture(autouse=True)
+def no_modal_dialogs(monkeypatch):
+    """Autouse for the whole suite: a QMessageBox.exec() with nothing to
+    dismiss it would hang a test forever rather than fail it. Records what
+    was shown (available as the fixture's return value) so a test can
+    still assert on dialog content without a human clicking through it."""
+    calls = []
+
+    def _record(kind):
+        def _fn(*args, **kwargs):
+            calls.append({"kind": kind, "args": args, "kwargs": kwargs})
+            return QMessageBox.StandardButton.Ok
+
+        return _fn
+
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(_record("critical")))
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(_record("information")))
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(_record("warning")))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_record("question")))
+    return calls
+
+
+@pytest.fixture(autouse=True)
+def no_blocking_menus(qapp):
+    """Settings/Account are QMenu.exec() calls -- a real nested event loop
+    that blocks waiting for a click, same problem as QMessageBox. Unlike
+    QMessageBox's static methods, QMenu.exec() is a Shiboken/C++-backed
+    instance method -- monkeypatching the class attribute does NOT
+    actually override it (verified: it still hangs). The standard,
+    reliable way to end a Qt modal loop from test code instead is a
+    QTimer polling QApplication.activePopupWidget() and closing whatever
+    it finds, which is what this does for the duration of every test
+    (construction/population of the menu still runs for real; it's just
+    dismissed with no selection rather than waited on)."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    def _close_any_popup():
+        popup = QApplication.instance().activePopupWidget()
+        if popup is not None:
+            popup.close()
+
+    timer = QTimer()
+    timer.timeout.connect(_close_any_popup)
+    timer.start(10)
+    yield
+    timer.stop()
+
+
+@pytest.fixture(autouse=True)
+def no_real_network(monkeypatch):
+    """Defense in depth on top of the architectural fact (verified in
+    Phase 2) that nothing auto-connects on construction: makes it
+    impossible for a chamber/OPC connection to actually open a socket
+    during a UI test, even if some future change added an unexpected
+    auto-connect path. Live Monitoring/OPC Server are only reachable via
+    an explicit Connect/Start click, which no smoke test in this suite
+    performs -- this exists purely as a safety net, not because a test
+    currently needs it."""
+    from app.services.tcp_client import ChamberConnection
+
+    monkeypatch.setattr(
+        ChamberConnection, "connect_to_host", lambda self, *a, **k: None, raising=False
+    )
+
+
+@pytest.fixture
+def deepvac_ui(deepvac_data_dir, qsettings_isolated, qapp, tmp_path, monkeypatch):
+    """Composition fixture for widget-construction tests: isolated data
+    dir + isolated QSettings + the shared pytest-qt QApplication, plus
+    DEEPVAC_DATA_ROOT pointed at an empty tmp_path so DeepVacDesktop.
+    __init__()'s load_runs() (which runs unconditionally, for real, on
+    construction) can't wander off and discover a real deepvac workspace
+    folder that happens to exist on whatever machine runs this suite --
+    it just sees zero source files and starts with an empty run list.
+    Tears down by closing every top-level window and asserting no
+    application-owned QThread (UploadWorker, SimWorker, ...) is still
+    running -- a leaked worker thread here would silently keep going into
+    the next test otherwise.
+    """
+    empty_workspace = tmp_path / "empty_workspace"
+    empty_workspace.mkdir(exist_ok=True)
+    monkeypatch.setenv("DEEPVAC_DATA_ROOT", str(empty_workspace))
+
+    yield deepvac_data_dir
+
+    app = QApplication.instance()
+    for window in list(app.topLevelWidgets()):
+        window.close()
+    app.processEvents()
+
+    leaked = [t for t in app.findChildren(QThread) if t.isRunning()]
+    assert not leaked, f"{len(leaked)} QThread(s) still running after test teardown: {leaked}"
+
+
+FAKE_USER = {"id": 0, "name": "Test User", "email": "test-user@example.com"}
+
+
+@pytest.fixture
+def fake_user():
+    """A throwaway in-memory user dict -- bypasses real authentication for
+    tests that only need *a* current_user to construct widgets with, same
+    approach as app.app._run_smoke_test()'s --smoke-test mode. A fresh copy
+    each time since callers may mutate it (e.g. profile-dialog tests)."""
+    return dict(FAKE_USER)
