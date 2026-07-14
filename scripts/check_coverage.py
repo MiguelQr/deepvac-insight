@@ -21,6 +21,7 @@ COVERAGE_JSON = Path(__file__).resolve().parent.parent / "coverage.json"
 # path (relative to repo root, forward slashes) -> minimum % line coverage.
 PER_FILE_THRESHOLDS = {
     "app/model/simulation.py": 85.0,
+    "app/services/data_service.py": 65.0,
 }
 PROJECT_THRESHOLD = 30.0
 
