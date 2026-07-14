@@ -1,6 +1,7 @@
 """MonitoringMixin — builds the Live Monitoring page and alarm management."""
 
-from PySide6.QtCore import Qt
+import pyqtgraph as pg
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -18,12 +19,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.common import fmt
+import app.services.alarms_service as alarms_service
+import app.services.data_service as data
+from app.common import COLORS, fmt
 
 # Internal English keys stay stable for storage/comparison; only the label
 # shown to the user is translated (built fresh, per language, where used).
 _CONDITIONS = ["above", "below", "outside range"]
 _SEVERITIES = ["Info", "Warning", "Critical"]
+
+# How many most-recent points the live chart redraws each sample -- the
+# full session (for "Save Session as Run") is kept in self._mon_buffer
+# uncapped; this only bounds what's actively plotted, so a long session
+# doesn't make every incoming sample redraw an ever-growing curve.
+_LIVE_CHART_WINDOW = 500
+# Reconnect attempts after a connection drop that the user didn't request
+# themselves (see _on_mon_disconnected_unexpectedly), with linear backoff.
+_RECONNECT_MAX_ATTEMPTS = 5
+_RECONNECT_DELAY_MS = 3000
 
 
 class MonitoringMixin:
@@ -112,6 +125,19 @@ class MonitoringMixin:
         status_row.addWidget(self._mon_dot)
         status_row.addWidget(self._mon_status_lbl, 1)
         cl.addLayout(status_row)
+
+        self._mon_recording_lbl = QLabel(self.tr("Not recording"))
+        self._mon_recording_lbl.setObjectName("sectionLabel")
+        cl.addWidget(self._mon_recording_lbl)
+
+        self._mon_save_session_btn = QPushButton(self.tr("Save Session as Run…"))
+        self._mon_save_session_btn.setEnabled(False)
+        self._mon_save_session_btn.setToolTip(
+            self.tr("Save every sample recorded this session as a normal run.")
+        )
+        self._mon_save_session_btn.clicked.connect(self._save_monitoring_session)
+        cl.addWidget(self._mon_save_session_btn)
+
         cl.addStretch(1)
         top_row.addWidget(conn_card)
 
@@ -144,6 +170,30 @@ class MonitoringMixin:
         top_row.addWidget(live_card, 1)
         outer.addLayout(top_row)
 
+        # ── Live trend chart ─────────────────────────────────────────────────
+        trend_card = QFrame()
+        trend_card.setObjectName("card")
+        tl = QVBoxLayout(trend_card)
+        tl.setContentsMargins(14, 14, 14, 14)
+        tl.setSpacing(8)
+        trend_lbl = QLabel(self.tr("LIVE TREND"))
+        trend_lbl.setObjectName("sectionLabel")
+        tl.addWidget(trend_lbl)
+
+        self._mon_plot_widget = pg.PlotWidget()
+        self._mon_plot_widget.setBackground(None)
+        self._mon_plot_widget.showGrid(x=True, y=True, alpha=0.15)
+        self._mon_plot_widget.addLegend()
+        self._mon_plot_widget.setMinimumHeight(220)
+        tl.addWidget(self._mon_plot_widget)
+        outer.addWidget(trend_card)
+
+        self._mon_buffer = []  # every sample this session -- see _save_monitoring_session
+        self._mon_curves = {}  # variable name -> PlotDataItem
+        self._mon_user_disconnected = False
+        self._mon_reconnect_attempts = 0
+        self._mon_reconnect_timer = None
+
         # ── Alarms ───────────────────────────────────────────────────────────
         alarms_card = QFrame()
         alarms_card.setObjectName("card")
@@ -159,6 +209,9 @@ class MonitoringMixin:
         adesc.setObjectName("sectionLabel")
         adesc.setWordWrap(True)
         alarms_hdr.addWidget(adesc, 1)
+        history_btn = QPushButton(self.tr("History…"))
+        history_btn.clicked.connect(self._open_alarm_history)
+        alarms_hdr.addWidget(history_btn)
         add_alarm_btn = QPushButton(self.tr("+ Add Alarm"))
         add_alarm_btn.setObjectName("primaryButton")
         add_alarm_btn.clicked.connect(self._toggle_alarm_form)
@@ -205,6 +258,27 @@ class MonitoringMixin:
             self._alarm_sev_combo.addItem(sev_labels[sev], sev)
         self._alarm_sev_combo.setFixedWidth(90)
 
+        self._alarm_deadband_ed = QLineEdit("0")
+        self._alarm_deadband_ed.setPlaceholderText(self.tr("deadband"))
+        self._alarm_deadband_ed.setToolTip(
+            self.tr(
+                "Once active, the value must return past the threshold by at least this "
+                "much before the alarm clears -- prevents rapid on/off flicker right at "
+                "the edge of the threshold."
+            )
+        )
+        self._alarm_deadband_ed.setFixedWidth(70)
+
+        self._alarm_delay_ed = QLineEdit("0")
+        self._alarm_delay_ed.setPlaceholderText(self.tr("delay (s)"))
+        self._alarm_delay_ed.setToolTip(
+            self.tr(
+                "The condition must hold continuously for this many seconds before the "
+                "alarm actually triggers -- prevents a single noisy sample from firing it."
+            )
+        )
+        self._alarm_delay_ed.setFixedWidth(70)
+
         save_alarm_btn = QPushButton(self.tr("Add"))
         save_alarm_btn.setObjectName("primaryButton")
         save_alarm_btn.clicked.connect(self._save_alarm)
@@ -218,6 +292,8 @@ class MonitoringMixin:
             (self.tr("Value"), self._alarm_val_ed),
             ("", self._alarm_val2_ed),
             (self.tr("Severity"), self._alarm_sev_combo),
+            (self.tr("Deadband"), self._alarm_deadband_ed),
+            (self.tr("Delay"), self._alarm_delay_ed),
             ("", save_alarm_btn),
             ("", cancel_alarm_btn),
         ]:
@@ -235,16 +311,44 @@ class MonitoringMixin:
         self._alarms_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._alarms_table.setSelectionMode(QAbstractItemView.SingleSelection)
         al.addWidget(self._alarms_table)
+        self._load_alarm_rules()
         self._refresh_alarms_table()
         outer.addWidget(alarms_card, 1)
         return container
+
+    def _load_alarm_rules(self):
+        """Loads persisted alarm rules, replacing the placeholder empty
+        list main_window.py's __init__ sets self._monitor_alarms to before
+        this page is ever built. Each rule dict gets runtime-only keys
+        added (_active, _last_value, _condition_since, _event_id) that are
+        never persisted -- see _evaluate_alarms()."""
+        try:
+            rules = alarms_service.list_rules()
+        except Exception:
+            rules = []
+        for rule in rules:
+            rule["_active"] = False
+            rule["_last_value"] = None
+            rule["_condition_since"] = None
+            rule["_event_id"] = None
+        self._monitor_alarms = rules
 
     # ── Connection ───────────────────────────────────────────────────────────
 
     def _on_mon_connect(self):
         if self.tcp.is_connected():
+            self._mon_user_disconnected = True  # don't auto-reconnect after this
             self.tcp.disconnect_from_host()
             return
+        self._mon_user_disconnected = False
+        self._mon_reconnect_attempts = 0
+        self._mon_buffer = []
+        self._mon_curves = {}
+        self._mon_plot_widget.clear()
+        self._mon_plot_widget.addLegend()
+        self._connect_to_host()
+
+    def _connect_to_host(self):
         host = self._mon_host.text().strip() or "127.0.0.1"
         port = self._mon_port.value()
         self._mon_connect_btn.setEnabled(False)
@@ -262,24 +366,88 @@ class MonitoringMixin:
             self._mon_status_lbl.setText(
                 self.tr("Online — {0}:{1}").format(host, self._mon_port.value())
             )
+            self._mon_reconnect_attempts = 0
+            self._mon_recording_lbl.setText(self.tr("Recording…"))
+            self._mon_save_session_btn.setEnabled(False)
         else:
             self._mon_status_lbl.setText(self.tr("Offline — not connected"))
             self._mon_live_table.setRowCount(0)
             self._mon_update_lbl.setText("—")
+            self._mon_save_session_btn.setEnabled(bool(self._mon_buffer))
+            if self._mon_buffer:
+                self._mon_recording_lbl.setText(
+                    self.tr("Stopped -- {0} sample(s) recorded").format(len(self._mon_buffer))
+                )
+            else:
+                self._mon_recording_lbl.setText(self.tr("Not recording"))
+            self._maybe_schedule_reconnect()
         for alarm in self._monitor_alarms:
             alarm["_active"] = False
         self._refresh_alarms_table()
+
+    def _maybe_schedule_reconnect(self):
+        if self._mon_user_disconnected:
+            return
+        if self._mon_reconnect_attempts >= _RECONNECT_MAX_ATTEMPTS:
+            self._mon_status_lbl.setText(
+                self.tr("Offline — reconnect failed after {0} attempts").format(
+                    _RECONNECT_MAX_ATTEMPTS
+                )
+            )
+            return
+        self._mon_reconnect_attempts += 1
+        self._mon_status_lbl.setText(
+            self.tr("Connection lost -- reconnecting (attempt {0}/{1})…").format(
+                self._mon_reconnect_attempts, _RECONNECT_MAX_ATTEMPTS
+            )
+        )
+        self._mon_reconnect_timer = QTimer(self)
+        self._mon_reconnect_timer.setSingleShot(True)
+        self._mon_reconnect_timer.timeout.connect(self._connect_to_host)
+        self._mon_reconnect_timer.start(_RECONNECT_DELAY_MS * self._mon_reconnect_attempts)
 
     def _mon_on_error(self, msg):
         self._mon_connect_btn.setEnabled(True)
         self._mon_connect_btn.setText(self.tr("Connect"))
         self._mon_status_lbl.setText(self.tr("Connection error: {0}").format(msg))
 
+    def _save_monitoring_session(self):
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+        if not self._mon_buffer:
+            return
+        default_name = f"monitoring-{len(self._mon_buffer)}-samples"
+        name, ok = QInputDialog.getText(
+            self, self.tr("Save Session as Run"), self.tr("Name:"), text=default_name
+        )
+        if not ok or not name.strip():
+            return
+        try:
+            result = data.save_monitoring_session(name.strip(), self._mon_buffer)
+        except Exception as exc:
+            QMessageBox.critical(self, self.tr("Save session failed"), str(exc))
+            return
+        self.runs = result["runs"]
+        self.render_runs()
+        self._refresh_dashboard()
+        self._refresh_reports()
+        self._mon_buffer = []
+        self._mon_save_session_btn.setEnabled(False)
+        self._mon_recording_lbl.setText(self.tr("Not recording"))
+        QMessageBox.information(
+            self,
+            self.tr("Session saved"),
+            self.tr("Saved as run '{0}'.").format(result["id"]),
+        )
+
     def _mon_on_sample(self, sample):
         from datetime import datetime, timezone
 
+        self._mon_buffer.append(sample)
+
         self._mon_update_lbl.setText(datetime.now(timezone.utc).strftime("%H:%M:%S UTC"))
         self._render_live_sample(sample)
+        self._render_live_chart()
         self._evaluate_alarms(sample)
 
     def _render_live_sample(self, sample):
@@ -294,12 +462,55 @@ class MonitoringMixin:
         self._mon_live_table.resizeColumnsToContents()
         self._mon_live_table.setUpdatesEnabled(True)
 
+    def _render_live_chart(self):
+        window = self._mon_buffer[-_LIVE_CHART_WINDOW:]
+        if not window:
+            return
+        has_timestamps = all(isinstance(s.get("timestamp"), (int, float)) for s in window)
+        if has_timestamps:
+            first_t = window[0]["timestamp"]
+            xs = [s["timestamp"] - first_t for s in window]
+        else:
+            xs = list(range(len(window)))
+
+        numeric_keys = sorted(
+            {
+                key
+                for s in window
+                for key, value in s.items()
+                if isinstance(value, (int, float)) and key != "timestamp"
+            }
+        )
+        for index, key in enumerate(numeric_keys):
+            ys = [s.get(key) for s in window]
+            plot_xs = [x for x, y in zip(xs, ys, strict=False) if isinstance(y, (int, float))]
+            plot_ys = [y for y in ys if isinstance(y, (int, float))]
+            if not plot_xs:
+                continue
+            color = COLORS[index % len(COLORS)]
+            curve = self._mon_curves.get(key)
+            if curve is None:
+                curve = self._mon_plot_widget.plot(
+                    plot_xs, plot_ys, pen=pg.mkPen(color, width=1.6), name=key
+                )
+                self._mon_curves[key] = curve
+            else:
+                curve.setData(plot_xs, plot_ys)
+
     # ── Alarms ───────────────────────────────────────────────────────────────
 
     def _toggle_alarm_form(self):
         self._alarm_form.setVisible(not self._alarm_form.isVisible())
 
+    def _open_alarm_history(self):
+        from app.alarm_history_dialog import AlarmHistoryDialog
+
+        dlg = AlarmHistoryDialog(current_user=self.current_user, parent=self)
+        dlg.exec()
+
     def _save_alarm(self):
+        from PySide6.QtWidgets import QMessageBox
+
         name = self._alarm_name_ed.text().strip()
         var = self._alarm_var_combo.currentText().strip()
         cond = self._alarm_cond_combo.currentData()
@@ -311,48 +522,93 @@ class MonitoringMixin:
         try:
             value = float(val_text)
             value2 = float(val2_text) if val2_text else None
+            deadband = float(self._alarm_deadband_ed.text().strip() or "0")
+            delay_s = float(self._alarm_delay_ed.text().strip() or "0")
         except ValueError:
             return
-        self._monitor_alarms.append(
-            {
-                "name": name,
-                "variable": var,
-                "condition": cond,
-                "value": value,
-                "value2": value2,
-                "severity": sev,
-                "_active": False,
-            }
-        )
+        if deadband < 0 or delay_s < 0:
+            QMessageBox.warning(
+                self, self.tr("Add Alarm"), self.tr("Deadband and delay must not be negative.")
+            )
+            return
+        try:
+            rule = alarms_service.add_rule(
+                name,
+                var,
+                cond,
+                value,
+                value2,
+                sev,
+                deadband=deadband,
+                delay_s=delay_s,
+                created_by=self.current_user.get("name") or "Unknown",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, self.tr("Add Alarm"), str(exc))
+            return
+        rule["_active"] = False
+        rule["_last_value"] = None
+        rule["_condition_since"] = None
+        rule["_event_id"] = None
+        self._monitor_alarms.append(rule)
         self._alarm_name_ed.clear()
         self._alarm_val_ed.clear()
         self._alarm_val2_ed.clear()
+        self._alarm_deadband_ed.setText("0")
+        self._alarm_delay_ed.setText("0")
         self._alarm_form.setVisible(False)
         self._refresh_alarms_table()
 
     def _delete_alarm(self, idx):
         if 0 <= idx < len(self._monitor_alarms):
-            self._monitor_alarms.pop(idx)
+            rule = self._monitor_alarms.pop(idx)
+            alarms_service.delete_rule(rule["id"])
         self._refresh_alarms_table()
 
     def _evaluate_alarms(self, sample):
+        import time
+
         changed = False
+        now = time.monotonic()
         for alarm in self._monitor_alarms:
             value = sample.get(alarm["variable"])
-            active = False
-            if isinstance(value, (int, float)):
-                cond = alarm["condition"]
-                if cond == "above":
-                    active = value > alarm["value"]
-                elif cond == "below":
-                    active = value < alarm["value"]
-                elif cond == "outside range" and alarm.get("value2") is not None:
-                    lo, hi = alarm["value"], alarm["value2"]
-                    active = value < min(lo, hi) or value > max(lo, hi)
-            if alarm.get("_active") != active:
-                changed = True
-            alarm["_active"] = active
             alarm["_last_value"] = value
+            if not isinstance(value, (int, float)):
+                continue
+
+            cond = alarm["condition"]
+            deadband = alarm.get("deadband") or 0.0
+            threshold, threshold2 = alarm["value"], alarm.get("value2")
+
+            if cond == "above":
+                raw_active = value > threshold
+                clears = value <= threshold - deadband
+            elif cond == "below":
+                raw_active = value < threshold
+                clears = value >= threshold + deadband
+            elif cond == "outside range" and threshold2 is not None:
+                lo, hi = min(threshold, threshold2), max(threshold, threshold2)
+                raw_active = value < lo or value > hi
+                clears = (lo + deadband) <= value <= (hi - deadband)
+            else:
+                continue
+
+            if not alarm["_active"]:
+                if raw_active:
+                    if alarm.get("_condition_since") is None:
+                        alarm["_condition_since"] = now
+                    if now - alarm["_condition_since"] >= (alarm.get("delay_s") or 0.0):
+                        alarm["_active"] = True
+                        changed = True
+                        alarm["_event_id"] = alarms_service.record_trigger(alarm, value)
+                else:
+                    alarm["_condition_since"] = None
+            elif clears:
+                alarm["_active"] = False
+                alarm["_condition_since"] = None
+                changed = True
+                alarms_service.record_clear(alarm.get("_event_id"))
+                alarm["_event_id"] = None
         if changed:
             self._refresh_alarms_table()
 

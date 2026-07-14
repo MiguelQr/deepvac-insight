@@ -12,6 +12,7 @@ from typing import cast
 from PySide6.QtCore import QCoreApplication
 
 from app.common import DATA_DIR
+from app.services import data_quality
 
 SAMPLES_FILE = "run_samples.csv"
 SUMMARY_FILE = "run_summary.csv"
@@ -191,6 +192,8 @@ def connect_cache(db_path=None):
     existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)")}
     if "source" not in existing_columns:
         conn.execute("ALTER TABLE runs ADD COLUMN source TEXT NOT NULL DEFAULT 'folder'")
+    if "quality_json" not in existing_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN quality_json TEXT NOT NULL DEFAULT '[]'")
 
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES('cache_version', ?)",
@@ -218,6 +221,7 @@ def cache_record_for(samples_path, key=None, group=None):
     columns = list(samples[0].keys()) if samples else []
     numeric = numeric_columns(samples)
     annotations = run_annotations(samples, summary, bands)
+    quality = data_quality.validate_samples(samples, numeric)
     return {
         "record": record,
         "run_path": str(path),
@@ -229,6 +233,7 @@ def cache_record_for(samples_path, key=None, group=None):
         "bands": bands,
         "annotations": annotations,
         "samples_rows": samples,
+        "quality": quality,
     }
 
 
@@ -265,8 +270,9 @@ def sync_cache(progress=None):
                     key, id, group_name, root_path, run_path, samples_path, source_mtime,
                     samples, duration_s, mae, cost, tail_mae, overshoot, settle_time_s,
                     start_time, end_time, columns_json, numeric_columns_json,
-                    summary_json, bands_json, annotations_json, samples_json, source, cached_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'folder', datetime('now'))
+                    summary_json, bands_json, annotations_json, samples_json, source,
+                    quality_json, cached_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'folder', ?, datetime('now'))
                 """,
                 (
                     record["key"],
@@ -291,6 +297,7 @@ def sync_cache(progress=None):
                     json.dumps(cached["bands"]),
                     json.dumps(cached["annotations"]),
                     json.dumps(cached["samples_rows"]),
+                    json.dumps(cached["quality"]),
                 ),
             )
             if index % 25 == 0:
@@ -320,29 +327,34 @@ def load_cached_runs():
         rows = conn.execute(
             """
             SELECT key, id, group_name, samples, duration_s, mae, cost, tail_mae,
-                   overshoot, settle_time_s, start_time, end_time, source
+                   overshoot, settle_time_s, start_time, end_time, source, quality_json
             FROM runs
             ORDER BY source_mtime DESC
             """
         ).fetchall()
-        return [
-            {
-                "key": row["key"],
-                "id": row["id"],
-                "group": row["group_name"],
-                "samples": row["samples"],
-                "duration_s": row["duration_s"],
-                "mae": row["mae"],
-                "cost": row["cost"],
-                "tail_mae": row["tail_mae"],
-                "overshoot": row["overshoot"],
-                "settle_time_s": row["settle_time_s"],
-                "start_time": row["start_time"],
-                "end_time": row["end_time"],
-                "source": row["source"],
-            }
-            for row in rows
-        ]
+        result = []
+        for row in rows:
+            errors, warnings = data_quality.summarize(json.loads(row["quality_json"]))
+            result.append(
+                {
+                    "key": row["key"],
+                    "id": row["id"],
+                    "group": row["group_name"],
+                    "samples": row["samples"],
+                    "duration_s": row["duration_s"],
+                    "mae": row["mae"],
+                    "cost": row["cost"],
+                    "tail_mae": row["tail_mae"],
+                    "overshoot": row["overshoot"],
+                    "settle_time_s": row["settle_time_s"],
+                    "start_time": row["start_time"],
+                    "end_time": row["end_time"],
+                    "source": row["source"],
+                    "quality_errors": errors,
+                    "quality_warnings": warnings,
+                }
+            )
+        return result
     finally:
         conn.close()
 
@@ -352,14 +364,18 @@ def _sanitize_key_component(text):
     return safe or "run"
 
 
-def _unique_upload_key(conn, run_name):
-    base = f"uploads/{_sanitize_key_component(run_name)}"
+def _unique_key(conn, prefix, run_name):
+    base = f"{prefix}/{_sanitize_key_component(run_name)}"
     key = base
     suffix = 2
     while conn.execute("SELECT 1 FROM runs WHERE key = ?", (key,)).fetchone():
         key = f"{base}_{suffix}"
         suffix += 1
     return key
+
+
+def _unique_upload_key(conn, run_name):
+    return _unique_key(conn, "uploads", run_name)
 
 
 def _iter_upload_sources(paths):
@@ -417,8 +433,9 @@ def upload_runs(paths, progress=None):
                     key, id, group_name, root_path, run_path, samples_path, source_mtime,
                     samples, duration_s, mae, cost, tail_mae, overshoot, settle_time_s,
                     start_time, end_time, columns_json, numeric_columns_json,
-                    summary_json, bands_json, annotations_json, samples_json, source, cached_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'upload', datetime('now'))
+                    summary_json, bands_json, annotations_json, samples_json, source,
+                    quality_json, cached_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'upload', ?, datetime('now'))
                 """,
                 (
                     record["key"],
@@ -443,9 +460,11 @@ def upload_runs(paths, progress=None):
                     json.dumps(cached["bands"]),
                     json.dumps(cached["annotations"]),
                     json.dumps(cached["samples_rows"]),
+                    json.dumps(cached["quality"]),
                 ),
             )
-            imported.append(record)
+            errors, warnings = data_quality.summarize(cached["quality"])
+            imported.append({**record, "quality_errors": errors, "quality_warnings": warnings})
             if index % 10 == 0:
                 conn.commit()
         conn.commit()
@@ -453,6 +472,71 @@ def upload_runs(paths, progress=None):
         conn.close()
 
     return {"imported": imported, "runs": load_cached_runs()}
+
+
+def save_monitoring_session(name, samples):
+    """Saves a buffered Live Monitoring session (a list[dict] of samples,
+    the same shape as one incoming TCP JSON line each -- see
+    tcp_client.ChamberConnection) directly into the run cache as a normal
+    run, with its own source='monitoring' tag (never pruned by sync_cache(),
+    same as source='upload' -- see its own comment in sync_cache())."""
+    name = str(name).strip()
+    if not name:
+        raise ValueError(_tr("Run name cannot be empty."))
+    if not samples:
+        raise ValueError(_tr("No samples were recorded in this session."))
+
+    columns = list(samples[0].keys())
+    numeric = numeric_columns(samples)
+    quality = data_quality.validate_samples(samples, numeric)
+    annotations = run_annotations(samples, {}, [])
+
+    timestamps = [to_float(row.get("timestamp")) for row in samples]
+    known_timestamps = [t for t in timestamps if t is not None]
+    duration_s = (max(known_timestamps) - min(known_timestamps)) if known_timestamps else None
+    start_time = format_ts(known_timestamps[0]) if known_timestamps else ""
+    end_time = format_ts(known_timestamps[-1]) if known_timestamps else ""
+
+    conn = connect_cache()
+    try:
+        key = _unique_key(conn, "monitoring", name)
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO runs (
+                key, id, group_name, root_path, run_path, samples_path, source_mtime,
+                samples, duration_s, mae, cost, tail_mae, overshoot, settle_time_s,
+                start_time, end_time, columns_json, numeric_columns_json,
+                summary_json, bands_json, annotations_json, samples_json, source,
+                quality_json, cached_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?,
+                      'monitoring', ?, datetime('now'))
+            """,
+            (
+                key,
+                name,
+                "monitoring",
+                "live-monitoring",
+                "live-monitoring",
+                "live-monitoring",
+                0.0,
+                len(samples),
+                duration_s,
+                start_time,
+                end_time,
+                json.dumps(columns),
+                json.dumps(numeric),
+                json.dumps({}),
+                json.dumps([]),
+                json.dumps(annotations),
+                json.dumps(samples),
+                json.dumps(quality),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"key": key, "id": name, "runs": load_cached_runs()}
 
 
 def rename_run(key, new_name):
@@ -502,6 +586,7 @@ def cached_run_payload(run_id):
             "columns": json.loads(row["columns_json"]),
             "numeric_columns": json.loads(row["numeric_columns_json"]),
             "samples_rows": json.loads(row["samples_json"]),
+            "quality": json.loads(row["quality_json"]),
         }
     finally:
         conn.close()
@@ -689,19 +774,22 @@ def run_detail(run_id):
             "annotations": cached["annotations"],
             "columns": cached["columns"],
             "numeric_columns": cached["numeric_columns"],
+            "quality": cached["quality"],
         }
 
     path = run_dir(run_id)
     samples = read_samples(path)
     summary = read_summary(path)
     bands = csv_dicts(path / BAND_METRICS_FILE)
+    numeric = numeric_columns(samples)
     return {
         "run": run_record(path / SAMPLES_FILE),
         "summary": summary,
         "bands": bands,
         "annotations": run_annotations(samples, summary, bands),
         "columns": list(samples[0].keys()) if samples else [],
-        "numeric_columns": numeric_columns(samples),
+        "numeric_columns": numeric,
+        "quality": data_quality.validate_samples(samples, numeric),
     }
 
 

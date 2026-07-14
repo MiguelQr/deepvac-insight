@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 import app.services.annotations_service as annotations_service
 import app.services.data_service as data
+import app.services.derived_variables_service as derived_variables_service
 import app.services.settings_service as settings_service
 from app.chart_widget import ChartWidget
 from app.common import COLORS, RULE_COLOR_OPTIONS, _svg_icon, csv_escape, fmt
@@ -67,6 +68,8 @@ class RunTabPage(QWidget):
         self._var_rules = []  # [{id, name, channel, lo, hi, color, user_name, ...}] — persisted
         self._rule_ch_combo = None
         self._rules_list_layout = None
+        self._derived_variables = []  # every definition, regardless of availability for this run
+        self._available_derived = []  # subset computable from this run's numeric_columns
         self._build_ui()
 
     # ── UI construction ───────────────────────────────────────────────────────
@@ -279,11 +282,30 @@ class RunTabPage(QWidget):
         self.title_label.setText(run.get("id", self.run_key))
         self._user_annotations = annotations_service.list_annotations(self.run_key)
         self._var_rules = annotations_service.list_rules(self.run_key)
+        self._load_derived_variables()
         self._render_summary()
         self._render_channels()
         self._refresh_annotations_list()
         self._refresh_rules_list()
         self._load_series()
+
+    def _load_derived_variables(self):
+        try:
+            self._derived_variables = derived_variables_service.list_derived_variables()
+        except Exception:
+            self._derived_variables = []
+        numeric_cols = set((self.detail or {}).get("numeric_columns", []))
+        self._available_derived = [
+            d
+            for d in self._derived_variables
+            if not derived_variables_service.missing_channels(d, numeric_cols)
+        ]
+        # A derived variable selected in a previous run may not be
+        # computable here -- drop it from the active selection rather than
+        # letting _load_series() fail on a channel that quietly isn't real.
+        available_names = {d["name"] for d in self._available_derived}
+        real_and_available = set(self.detail.get("numeric_columns", [])) | available_names
+        self.selected_columns = {c for c in self.selected_columns if c in real_and_available}
 
     def set_compare_run(self, key, checked):
         if checked:
@@ -331,7 +353,11 @@ class RunTabPage(QWidget):
         for i, col in enumerate(cols):
             if col not in self._channel_colors:
                 self._channel_colors[col] = COLORS[i % len(COLORS)]
-        self.selected_columns = {c for c in self.selected_columns if c in cols}
+        for i, d in enumerate(self._available_derived):
+            if d["name"] not in self._channel_colors:
+                self._channel_colors[d["name"]] = d.get("color") or COLORS[i % len(COLORS)]
+        available_names = set(cols) | {d["name"] for d in self._available_derived}
+        self.selected_columns = {c for c in self.selected_columns if c in available_names}
         if not self.selected_columns:
             preferred = [c for c in ["temp", "temp_ref"] if c in cols]
             self.selected_columns = set(preferred or cols[:2])
@@ -340,9 +366,10 @@ class RunTabPage(QWidget):
 
     def _update_ch_btn_label(self):
         cols = (self.detail or {}).get("numeric_columns", [])
+        total = len(cols) + len(self._available_derived)
         n = len(self.selected_columns)
         self._ch_btn.setText(
-            self.tr("Channels ({0}/{1}) ▾").format(n, len(cols)) if cols else self.tr("Channels ▾")
+            self.tr("Channels ({0}/{1}) ▾").format(n, total) if total else self.tr("Channels ▾")
         )
 
     def _open_channels_menu(self):
@@ -350,30 +377,67 @@ class RunTabPage(QWidget):
             return
         menu = QMenu(self)
         for col in self.detail.get("numeric_columns", []):
-            wa = QWidgetAction(menu)
-            row = QWidget()
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(10, 4, 10, 4)
-            rl.setSpacing(10)
+            self._add_channel_menu_row(menu, col)
 
-            cb = QCheckBox(col)
-            cb.setChecked(col in self.selected_columns)
-            cb.stateChanged.connect(lambda state, c=col: self._set_channel_active(c, bool(state)))
+        if self._available_derived:
+            menu.addSeparator()
+            header = menu.addAction(self.tr("DERIVED VARIABLES"))
+            header.setEnabled(False)
+            for d in self._available_derived:
+                self._add_channel_menu_row(menu, d["name"], tooltip=self._derived_tooltip(d))
 
-            swatch = QPushButton()
-            swatch.setFixedSize(16, 16)
-            color = self._channel_colors.get(col, COLORS[0])
-            swatch.setStyleSheet(
-                f"background:{color};border:1px solid rgba(255,255,255,0.25);border-radius:3px;"
-            )
-            swatch.clicked.connect(lambda _, c=col, m=menu: self._pick_channel_color(c, m))
-
-            rl.addWidget(cb, 1)
-            rl.addWidget(swatch)
-            wa.setDefaultWidget(row)
-            menu.addAction(wa)
+        menu.addSeparator()
+        manage_action = menu.addAction(self.tr("Manage Derived Variables…"))
+        manage_action.triggered.connect(self._open_derived_variables_dialog)
 
         menu.exec(self._ch_btn.mapToGlobal(self._ch_btn.rect().bottomLeft()))
+
+    def _open_derived_variables_dialog(self):
+        from app.derived_variables_dialog import DerivedVariablesDialog
+
+        numeric_cols = (self.detail or {}).get("numeric_columns", [])
+        dlg = DerivedVariablesDialog(numeric_cols, current_user=self.current_user, parent=self)
+        dlg.exec()
+        if dlg.changed:
+            self._load_derived_variables()
+            self._render_channels()
+            self._load_series()
+
+    def _derived_tooltip(self, definition):
+        kind = {
+            derived_variables_service.TYPE_DIFFERENCE: self.tr("difference"),
+            derived_variables_service.TYPE_RATE_OF_CHANGE: self.tr("rate of change"),
+            derived_variables_service.TYPE_ROLLING_STD: self.tr("rolling std. dev."),
+            derived_variables_service.TYPE_CUMULATIVE_INTEGRAL: self.tr("cumulative integral"),
+            derived_variables_service.TYPE_CUSTOM: self.tr("custom expression"),
+        }.get(definition["type"], definition["type"])
+        return f"{kind}: {definition.get('expression') or definition.get('source_channel', '')}"
+
+    def _add_channel_menu_row(self, menu, col, tooltip=None):
+        wa = QWidgetAction(menu)
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(10, 4, 10, 4)
+        rl.setSpacing(10)
+
+        cb = QCheckBox(col)
+        cb.setChecked(col in self.selected_columns)
+        if tooltip:
+            cb.setToolTip(tooltip)
+        cb.stateChanged.connect(lambda state, c=col: self._set_channel_active(c, bool(state)))
+
+        swatch = QPushButton()
+        swatch.setFixedSize(16, 16)
+        color = self._channel_colors.get(col, COLORS[0])
+        swatch.setStyleSheet(
+            f"background:{color};border:1px solid rgba(255,255,255,0.25);border-radius:3px;"
+        )
+        swatch.clicked.connect(lambda _, c=col, m=menu: self._pick_channel_color(c, m))
+
+        rl.addWidget(cb, 1)
+        rl.addWidget(swatch)
+        wa.setDefaultWidget(row)
+        menu.addAction(wa)
 
     def _set_channel_active(self, col, active):
         if active:
@@ -400,6 +464,10 @@ class RunTabPage(QWidget):
             return
         try:
             if self._compare_mode():
+                # Derived variables aren't supported in compare mode: each
+                # compared run would need its own source-channel fetch and
+                # its own availability check, and the primary use case
+                # (comparing one real channel across runs) doesn't need them.
                 ch = self._first_col()
                 series = []
                 for key in self.compare_runs:
@@ -408,11 +476,67 @@ class RunTabPage(QWidget):
                     series.append({"label": run["id"] if run else key, "points": payload["points"]})
                 self.series = {"series": series, "channel": ch}
             else:
-                self.series = data.run_series(self.run_key, cols)
+                self.series = self._load_series_with_derived(cols)
         except Exception as exc:
             QMessageBox.critical(self, self.tr("Series error"), str(exc))
             return
         self.refresh_chart()
+
+    def _load_series_with_derived(self, cols):
+        real_available = set(self.detail.get("numeric_columns", []))
+        derived_by_name = {d["name"]: d for d in self._available_derived}
+        selected_real = [c for c in cols if c in real_available]
+        selected_derived = [derived_by_name[c] for c in cols if c in derived_by_name]
+
+        needed_real = set(selected_real)
+        for d in selected_derived:
+            needed_real |= derived_variables_service.required_channels(d) & real_available
+        if not needed_real:
+            return {"columns": [], "points": []}
+
+        payload = data.run_series(self.run_key, sorted(needed_real))
+
+        if selected_derived:
+            self._inject_derived_series(payload, needed_real, selected_derived)
+
+        displayed = {c for c in selected_real} | {d["name"] for d in selected_derived}
+        payload["columns"] = [c for c in cols if c in displayed]
+        return payload
+
+    def _inject_derived_series(self, payload, needed_real, selected_derived):
+        import numpy as np
+
+        points = payload["points"]
+        raw_t = [p.get("t") for p in points]
+        first_t = next((t for t in raw_t if isinstance(t, (int, float))), None)
+        elapsed = np.array(
+            [
+                (t - first_t) if isinstance(t, (int, float)) and first_t is not None else float(i)
+                for i, t in enumerate(raw_t)
+            ],
+            dtype=float,
+        )
+        columns_data = {
+            col: np.array(
+                [
+                    v if isinstance((v := p["values"].get(col)), (int, float)) else np.nan
+                    for p in points
+                ],
+                dtype=float,
+            )
+            for col in needed_real
+        }
+        for definition in selected_derived:
+            try:
+                computed = derived_variables_service.compute_series(
+                    definition, columns_data, elapsed
+                )
+            except derived_variables_service.DerivedVariableError:
+                continue  # already checked for availability; a runtime failure just omits it
+            for point, value in zip(points, computed, strict=False):
+                point["values"][definition["name"]] = (
+                    None if value != value else float(value)
+                )  # NaN -> None
 
     def refresh_chart(self):
         setpoint = None

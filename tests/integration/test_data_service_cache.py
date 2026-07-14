@@ -314,6 +314,53 @@ def test_corrupt_cache_file_raises_recoverable_sqlite_error(deepvac_data_dir):
         conn.execute("SELECT * FROM runs").fetchall()
 
 
+def test_save_monitoring_session_creates_a_run_with_monitoring_source(deepvac_data_dir):
+    samples = [{"timestamp": str(1700000000 + i * 2), "temp": str(20.0 + i)} for i in range(5)]
+    result = data_service.save_monitoring_session("live-test", samples)
+    assert result["id"] == "live-test"
+
+    runs = data_service.load_cached_runs()
+    assert len(runs) == 1
+    assert runs[0]["source"] == "monitoring"
+    assert runs[0]["samples"] == 5
+    assert runs[0]["duration_s"] == pytest.approx(8.0)
+
+
+def test_save_monitoring_session_empty_name_raises(deepvac_data_dir):
+    with pytest.raises(ValueError):
+        data_service.save_monitoring_session("   ", [{"timestamp": "1700000000", "temp": "20.0"}])
+
+
+def test_save_monitoring_session_no_samples_raises(deepvac_data_dir):
+    with pytest.raises(ValueError):
+        data_service.save_monitoring_session("live-test", [])
+
+
+def test_save_monitoring_session_duplicate_name_gets_suffixed_key(deepvac_data_dir):
+    samples = [{"timestamp": "1700000000", "temp": "20.0"}]
+    result_a = data_service.save_monitoring_session("live-test", samples)
+    result_b = data_service.save_monitoring_session("live-test", samples)
+    assert result_a["key"] != result_b["key"]
+    assert len(data_service.load_cached_runs()) == 2
+
+
+def test_save_monitoring_session_is_never_pruned_by_sync_cache(deepvac_data_dir, fake_workspace):
+    samples = [{"timestamp": "1700000000", "temp": "20.0"}]
+    data_service.save_monitoring_session("live-test", samples)
+    # An empty folder workspace must not prune the monitoring-sourced row,
+    # same guarantee as source='upload' (see the never-prunes-uploads test above).
+    result = data_service.sync_cache()
+    assert len(result["runs"]) == 1
+    assert result["runs"][0]["source"] == "monitoring"
+
+
+def test_save_monitoring_session_records_quality_issues(deepvac_data_dir):
+    samples = [{"timestamp": "1700000000", "temp": "oops"}] * 1
+    result = data_service.save_monitoring_session("live-test", samples)
+    payload = data_service.cached_run_payload(result["key"])
+    assert isinstance(payload["quality"], list)
+
+
 def test_schema_migration_adds_source_column_to_pre_existing_table(deepvac_data_dir):
     # Characterizes the in-place ALTER TABLE migration: a "runs" table
     # created without the `source` column (as an older cache file would
