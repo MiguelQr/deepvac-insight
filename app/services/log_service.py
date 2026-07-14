@@ -8,6 +8,7 @@ this replaces that with: always logged to data/logs/app.log, and shown to
 the user in a dialog when a Qt application is running.
 """
 
+import contextlib
 import logging
 import sys
 import traceback
@@ -20,6 +21,7 @@ LOG_FILE = LOG_DIR / "app.log"
 
 _logging_configured = False
 _hook_installed = False
+_exception_listeners = []
 
 
 def setup_logging():
@@ -46,9 +48,13 @@ def setup_logging():
     _logging_configured = True
 
 
-def install_excepthook():
+def install_excepthook(show_dialog=True):
     """Route uncaught exceptions to the log file and, if a QApplication is
-    running, a crash dialog. Safe to call more than once."""
+    running and show_dialog is True, a crash dialog. show_dialog=False is
+    for --smoke-test: a blocking QMessageBox.exec() with nothing to dismiss
+    it would hang the process forever instead of exiting automatically.
+    Safe to call more than once (later calls are a no-op, same as before --
+    show_dialog only takes effect on the first, installing call)."""
     global _hook_installed
     if _hook_installed:
         return
@@ -63,11 +69,24 @@ def install_excepthook():
             return
         text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         logger.error("Unhandled exception:\n%s", text)
-        _show_crash_dialog(exc_type, exc_value, text)
+        for listener in _exception_listeners:
+            with contextlib.suppress(Exception):
+                listener(exc_type, exc_value, exc_tb)
+        if show_dialog:
+            _show_crash_dialog(exc_type, exc_value, text)
         previous_hook(exc_type, exc_value, exc_tb)
 
     sys.excepthook = _hook
     _hook_installed = True
+
+
+def add_exception_listener(callback):
+    """Register callback(exc_type, exc_value, exc_tb), invoked whenever the
+    global excepthook fires (in addition to logging/the dialog). This is
+    what lets --smoke-test detect an exception raised inside a Qt signal/
+    slot callback during app.exec() -- those never propagate as a normal
+    Python exception to the calling frame the way a synchronous one would."""
+    _exception_listeners.append(callback)
 
 
 def _show_crash_dialog(exc_type, exc_value, text):

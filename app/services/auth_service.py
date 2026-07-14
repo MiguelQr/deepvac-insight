@@ -27,9 +27,14 @@ class AuthError(Exception):
     pass
 
 
-def connect_auth():
-    AUTH_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(AUTH_DB)
+def connect_auth(db_path=None):
+    """db_path overrides AUTH_DB for this call only -- the module-level
+    constant is what every other function in this module uses implicitly,
+    and is the intended monkeypatch seam for tests exercising those
+    (create_user, authenticate, ...) against an isolated database."""
+    path = db_path or AUTH_DB
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(

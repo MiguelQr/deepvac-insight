@@ -2,29 +2,75 @@
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
-if getattr(sys, "frozen", False):
-    # Running from a PyInstaller bundle: bundled read-only resources (icons,
-    # translations, the model checkpoint) live under the bundle directory
-    # (sys._MEIPASS for --onefile, the exe's own folder for --onedir -- both
-    # are exposed via _MEIPASS). That directory may be inside Program Files
-    # and isn't guaranteed writable, so user-writable state (databases,
-    # logs, backups, generated reports) goes to %LOCALAPPDATA% instead,
-    # which is what a real Windows install is expected to do.
-    # _MEIPASS is set by PyInstaller's bootloader at runtime; it's not part
-    # of typeshed's sys stub, hence the ignore.
-    RESOURCES_DIR = Path(sys._MEIPASS) / "resources"  # type: ignore[attr-defined]
-    DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "DeepVac" / "data"
-else:
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent
-    RESOURCES_DIR = PROJECT_ROOT / "resources"
-    DATA_DIR = PROJECT_ROOT / "data"
-REPORTS_DIR = DATA_DIR / "reports"
+
+@dataclass(frozen=True)
+class AppPaths:
+    resources_dir: Path
+    data_dir: Path
+    reports_dir: Path
+    logs_dir: Path
+    backups_dir: Path
+
+
+def resolve_app_paths(data_dir_override: Path | str | None = None) -> AppPaths:
+    """Resolve read-only resource and writable-data directories.
+
+    Read-only resources (icons, translations, the model checkpoint) always
+    resolve relative to the source tree, or, when frozen, the PyInstaller
+    bundle directory (sys._MEIPASS for --onefile, the exe's own folder for
+    --onedir -- both are exposed via _MEIPASS). That directory may be inside
+    Program Files and isn't guaranteed writable, which is exactly why
+    writable data is resolved separately below rather than reusing it.
+
+    Writable data (databases, logs, backups, generated reports) resolves in
+    priority order: `data_dir_override` (for tests that want an isolated
+    directory per test without touching the environment), then the
+    DEEPVAC_DATA_DIR environment variable (for whole-process isolation --
+    e.g. the --smoke-test CLI mode, or a CI job), then the unchanged
+    production default (source-tree data/, or %LOCALAPPDATA%\\DeepVac\\data
+    when frozen). With neither set, this resolves exactly as it always did.
+    """
+    if getattr(sys, "frozen", False):
+        # _MEIPASS is set by PyInstaller's bootloader at runtime; it's not
+        # part of typeshed's sys stub, hence the ignore.
+        resources_dir = Path(sys._MEIPASS) / "resources"  # type: ignore[attr-defined]
+        default_data_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "DeepVac" / "data"
+    else:
+        project_root = Path(__file__).resolve().parent.parent
+        resources_dir = project_root / "resources"
+        default_data_dir = project_root / "data"
+
+    if data_dir_override is not None:
+        data_dir = Path(data_dir_override)
+    elif os.environ.get("DEEPVAC_DATA_DIR"):
+        data_dir = Path(os.environ["DEEPVAC_DATA_DIR"])
+    else:
+        data_dir = default_data_dir
+
+    return AppPaths(
+        resources_dir=resources_dir,
+        data_dir=data_dir,
+        reports_dir=data_dir / "reports",
+        logs_dir=data_dir / "logs",
+        backups_dir=data_dir / "backups",
+    )
+
+
+# Backward-compatible module-level constants -- existing UI/service code
+# that does `from app.common import DATA_DIR` etc. keeps working unchanged.
+# Resolved once, at import time, from whatever DEEPVAC_DATA_DIR is set to at
+# that moment (or unset, for production/default behavior).
+_paths = resolve_app_paths()
+RESOURCES_DIR = _paths.resources_dir
+DATA_DIR = _paths.data_dir
+REPORTS_DIR = _paths.reports_dir
 
 LOGO_PATH = str(RESOURCES_DIR / "logo.png")
 ICON_PATH = str(RESOURCES_DIR / "icon.png")

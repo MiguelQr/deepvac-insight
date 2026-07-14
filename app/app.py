@@ -2,7 +2,7 @@
 
 import sys
 
-from PySide6.QtCore import QCoreApplication, QRectF, QSettings, Qt
+from PySide6.QtCore import QCoreApplication, QRectF, QSettings, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
@@ -52,7 +52,84 @@ def _remembered_user():
     return auth_service.get_user_by_token(token) if token else None
 
 
+def _show_splash(app, window_receiver_attr_name=None):
+    splash = make_splash()
+    splash.show()
+    splash.showMessage(
+        QCoreApplication.translate("main", "Starting DeepVac…"),
+        Qt.AlignCenter | Qt.AlignBottom,
+        Qt.white,
+    )
+    app.processEvents()
+    return splash
+
+
+def _run_smoke_test(no_splash=False):
+    """Exercise the real startup path end to end, then exit automatically.
+
+    Used by CI / packaging checks to catch "won't even start" regressions
+    (bad imports, a bootstrap-time exception, a missing bundled resource)
+    without a human watching it launch. Deliberately does NOT go through
+    LoginWindow -- that's an interactive, credential-requiring modal, and
+    a smoke test must need neither a human nor an existing account -- so
+    it constructs DeepVacDesktop directly with a throwaway in-memory user.
+    No real chamber/OPC connection is ever attempted here: those only start
+    from an explicit Connect/Start click in Live Monitoring/OPC Server,
+    never from construction or restore_window_state().
+    """
+    failure = {}
+
+    def on_exception(exc_type, exc_value, exc_tb):
+        # sys.excepthook fires for exceptions raised inside Qt signal/slot
+        # callbacks too, which otherwise wouldn't propagate to the try/except
+        # below -- this is what lets those still fail the smoke test.
+        failure.setdefault("exc", (exc_type, exc_value))
+
+    log_service.install_excepthook(show_dialog=False)
+    log_service.add_exception_listener(on_exception)
+
+    app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(ICON_PATH))
+    i18n_service.install_language(app, settings_service.load_language())
+
+    try:
+        backup_service.backup_all()
+    except Exception as exc:
+        print(f"[backup] startup backup skipped: {exc}")
+
+    fake_user = {"id": 0, "name": "Smoke Test", "email": "smoke-test@localhost"}
+
+    window = None
+    try:
+        splash = None if no_splash else _show_splash(app)
+        window = DeepVacDesktop(splash=splash, current_user=fake_user)
+        window.restore_window_state()
+        if splash is not None:
+            splash.finish(window)
+    except Exception as exc:
+        failure.setdefault("exc", (type(exc), exc))
+
+    QTimer.singleShot(200, app.quit)
+    app.exec()
+
+    if window is not None:
+        window.close()
+
+    if "exc" in failure:
+        exc_type, exc_value = failure["exc"]
+        print(f"[smoke-test] FAILED: {exc_type.__name__}: {exc_value}", file=sys.stderr)
+        return 1
+    print("[smoke-test] OK")
+    return 0
+
+
 def main():
+    args = sys.argv[1:]
+    if "--smoke-test" in args:
+        sys.exit(_run_smoke_test(no_splash="--no-splash" in args))
+
+    no_splash = "--no-splash" in args
+
     log_service.install_excepthook()
 
     app = QApplication(sys.argv)
@@ -75,18 +152,12 @@ def main():
             if user is None:
                 sys.exit(0)
 
-        splash = make_splash()
-        splash.show()
-        splash.showMessage(
-            QCoreApplication.translate("main", "Starting DeepVac…"),
-            Qt.AlignCenter | Qt.AlignBottom,
-            Qt.white,
-        )
-        app.processEvents()
+        splash = None if no_splash else _show_splash(app)
 
         window = DeepVacDesktop(splash=splash, current_user=user)
         window.restore_window_state()
-        splash.finish(window)
+        if splash is not None:
+            splash.finish(window)
         app.exec()
 
         if not window.logout_requested:

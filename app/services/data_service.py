@@ -137,8 +137,11 @@ def cache_path():
     return CACHE_DB
 
 
-def connect_cache():
-    path = cache_path()
+def connect_cache(db_path=None):
+    """db_path overrides both DEEPVAC_VISUALIZATION_DB and CACHE_DB for
+    this call only -- see connect_auth()'s docstring for why the other
+    (module-level-constant) functions in this file don't take this too."""
+    path = db_path or cache_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row

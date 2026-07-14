@@ -12,9 +12,13 @@ from app.common import DATA_DIR
 ANNOTATIONS_DB = DATA_DIR / "deepvac_annotations.sqlite3"
 
 
-def connect_annotations():
-    ANNOTATIONS_DB.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(ANNOTATIONS_DB)
+def connect_annotations(db_path=None):
+    """db_path overrides ANNOTATIONS_DB for this call only -- see
+    auth_service.connect_auth()'s docstring for the module-level-constant
+    seam every other function in this file uses implicitly instead."""
+    path = db_path or ANNOTATIONS_DB
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(

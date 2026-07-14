@@ -21,19 +21,20 @@ BACKUPS_DIR = DATA_DIR / "backups"
 MAX_BACKUPS_PER_DB = 14
 
 
-def _source_databases():
-    if not DATA_DIR.exists():
+def _source_databases(data_dir):
+    if not data_dir.exists():
         return []
-    return sorted(DATA_DIR.glob("*.sqlite3"))
+    return sorted(data_dir.glob("*.sqlite3"))
 
 
 def _today_stamp():
     return datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
-def backup_database(source_path, reason="startup"):
+def backup_database(source_path, reason="startup", backups_dir=None):
     """Write one timestamped online backup of source_path. Returns the new path."""
-    dest_dir = BACKUPS_DIR / source_path.stem
+    backups_dir = backups_dir or BACKUPS_DIR
+    dest_dir = backups_dir / source_path.stem
     dest_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     dest_path = dest_dir / f"{source_path.stem}_{stamp}_{reason}.sqlite3"
@@ -55,14 +56,17 @@ def _prune(dest_dir, keep=MAX_BACKUPS_PER_DB):
         old.unlink(missing_ok=True)
 
 
-def backup_all(force=False):
-    """Back up every database in DATA_DIR. Skips a database that already has
-    a backup from today unless force=True. Never raises -- a backup failure
-    is printed and skipped rather than blocking app startup."""
+def backup_all(force=False, data_dir=None, backups_dir=None):
+    """Back up every database in data_dir (default: DATA_DIR). Skips a
+    database that already has a backup from today unless force=True. Never
+    raises -- a backup failure is printed and skipped rather than blocking
+    app startup."""
+    data_dir = data_dir or DATA_DIR
+    backups_dir = backups_dir or BACKUPS_DIR
     results = []
     stamp = _today_stamp()
-    for source_path in _source_databases():
-        dest_dir = BACKUPS_DIR / source_path.stem
+    for source_path in _source_databases(data_dir):
+        dest_dir = backups_dir / source_path.stem
         already_today = (
             not force
             and dest_dir.exists()
@@ -73,7 +77,9 @@ def backup_all(force=False):
         if already_today:
             continue
         try:
-            dest_path = backup_database(source_path, reason="manual" if force else "daily")
+            dest_path = backup_database(
+                source_path, reason="manual" if force else "daily", backups_dir=backups_dir
+            )
             _prune(dest_dir)
             results.append(dest_path)
         except Exception as exc:
@@ -81,19 +87,20 @@ def backup_all(force=False):
     return results
 
 
-def list_backups():
+def list_backups(backups_dir=None):
     """Return {db_stem: [backup Paths, oldest first]} for display/restore."""
+    backups_dir = backups_dir or BACKUPS_DIR
     out: dict[str, list[Path]] = {}
-    if not BACKUPS_DIR.exists():
+    if not backups_dir.exists():
         return out
-    for sub in sorted(BACKUPS_DIR.iterdir()):
+    for sub in sorted(backups_dir.iterdir()):
         if sub.is_dir():
             out[sub.name] = sorted(sub.glob("*.sqlite3"), key=lambda p: p.stat().st_mtime)
     return out
 
 
-def restore_backup(db_name, backup_path):
-    """Restore data/<db_name> from a backup file. The live database is
+def restore_backup(db_name, backup_path, data_dir=None, backups_dir=None):
+    """Restore <data_dir>/<db_name> from a backup file. The live database is
     itself preserved first (reason 'pre-restore') so a bad restore can be
     undone. That safety copy is a raw file copy, not the sqlite online
     backup API used elsewhere in this module -- restore exists precisely
@@ -102,9 +109,11 @@ def restore_backup(db_name, backup_path):
     backup API requires opening the source as a valid database first. Any
     -wal/-shm sidecar files for the live database are cleared so the
     restored file becomes the sole source of truth."""
-    target = DATA_DIR / db_name
+    data_dir = data_dir or DATA_DIR
+    backups_dir = backups_dir or BACKUPS_DIR
+    target = data_dir / db_name
     if target.exists():
-        dest_dir = BACKUPS_DIR / target.stem
+        dest_dir = backups_dir / target.stem
         dest_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         shutil.copyfile(target, dest_dir / f"{target.stem}_{stamp}_pre-restore.sqlite3")
