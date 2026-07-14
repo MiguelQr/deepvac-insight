@@ -98,10 +98,23 @@
       "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m pip install pyinstaller-hooks-contrib --quiet)",
       "Bash(/c/Users/mike_/.conda/envs/deepapp/python.exe -I -m PyInstaller deepvac.spec --noconfirm --clean)",
       "Bash(echo \"EXIT: $?\")",
-      "Bash(timeout 20 ./dist/DeepVac/DeepVac.exe)"
+      "Bash(timeout 20 ./dist/DeepVac/DeepVac.exe)",
+      "Bash(git checkout *)",
+      "Bash(git rm *)",
+      "Bash(uv python *)",
+      "Bash(uv sync *)",
+      "Bash(uv run *)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/Scripts/pyside6-lupdate.exe -extensions py -recursive app -ts /tmp/verify_es.ts)",
+      "Bash(rm -f /tmp/verify_es.ts)",
+      "Bash(cp resources/i18n/deepvac_es.ts /tmp/deepvac_es_before.ts)",
+      "Bash(/c/Users/mike_/.conda/envs/deepapp/Scripts/pyside6-lupdate.exe -extensions py -recursive app -ts /tmp/deepvac_es_before.ts)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Read(//c//**)"
     ],
     "additionalDirectories": [
-      "C:\\Users\\mike_\\AppData\\Local\\Temp\\claude\\c--Users-mike--Desktop-deepvac-insight\\7992bfea-42b7-4f76-b038-53669d54b380\\scratchpad"
+      "C:\\Users\\mike_\\AppData\\Local\\Temp\\claude\\c--Users-mike--Desktop-deepvac-insight\\7992bfea-42b7-4f76-b038-53669d54b380\\scratchpad",
+      "\\tmp"
     ]
   }
 }
