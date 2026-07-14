@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "checkpoint": "model.pt",
+  "candidate": {
+    "candidate_id": 1,
+    "kp": 7.0,
+    "ki": 700.0,
+    "kd": 10.0
+  },
+  "args": {
+    "start_temp": 27.0,
+    "target_temp": 60.0,
+    "duration_s": 20.0,
+    "dt_s": 2.0,
+    "precondition_ref": null,
+    "u_min": -1.0,
+    "u_max": 1.0,
+    "control_feature_scale": 100.0,
+    "pid_i_reverse_mul": 0.333,
+    "pid_period_s": 0.1,
+    "initial_i": 0.0,
+    "initial_d": 0.0,
+    "initial_p": 0.0,
+    "tail_window_s": 20.0,
+    "near_band": 2.0,
+    "settle_band": 0.5,
+    "w_tail_mae": 1.0,
+    "w_overshoot_max": 10.0,
+    "w_tail_std": 0.5,
+    "w_final_error": 0.5,
+    "w_invalid": 1000000.0,
+    "max_abs_temp": 200.0
+  },
+  "window_steps": 60,
+  "feature_names": [
+    "temp",
+    "temp_ref",
+    "error",
+    "temp_u",
+    "temp_u_p",
+    "temp_u_i",
+    "temp_u_d",
+    "kp",
+    "ki",
+    "kd"
+  ],
+  "tolerance": {
+    "rel": 0.0001,
+    "abs": 1e-06
+  },
+  "expected": {
+    "temp": [
+      27.03311693,
+      27.03370282,
+      27.01115092,
+      26.97454377,
+      26.93134919,
+      26.88417024,
+      26.83415902,
+      26.78181112,
+      26.72738684,
+      26.67103559
+    ],
+    "elapsed_s": [
+      2.0,
+      4.0,
+      6.0,
+      8.0,
+      10.0,
+      12.0,
+      14.0,
+      16.0,
+      18.0,
+      20.0
+    ],
+    "metrics": {
+      "candidate_id": 1.0,
+      "kp": 7.0,
+      "ki": 700.0,
+      "kd": 10.0,
+      "cost": 49.83826426,
+      "valid": true,
+      "invalid_reason": "",
+      "tail_mae": 33.11175736,
+      "tail_bias": 33.11175736,
+      "tail_std": 0.12404939,
+      "overshoot_max": 0.0,
+      "overshoot_rmse": 0.0,
+      "final_error": 33.32896441,
+      "final_abs_error": 33.32896441,
+      "time_to_near_s": 1019.0,
+      "time_to_settle_s": 1019.0,
+      "mae_full": 33.11175736,
+      "min_temp": 26.67103559,
+      "max_temp": 27.03370282,
+      "end_temp": 26.67103559
+    }
+  }
+}
