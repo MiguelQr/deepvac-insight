@@ -37,8 +37,7 @@ insight/
 
 ## Install
 
-Dependencies are declared in `pyproject.toml` (the single source of truth --
-there is no separate `requirements.txt` to keep in sync with it). Managed
+Dependencies are declared in `pyproject.toml`. Managed
 with [uv](https://docs.astral.sh/uv/):
 
 ```powershell
@@ -78,11 +77,9 @@ Generated reports are written to `data\reports\`.
 ## Accounts
 
 The app always opens to a sign-in screen, backed by `data\deepvac_users.sqlite3`
-(passwords are salted + PBKDF2-hashed, never stored in plain text). A "Create
-one" link on the login form switches to registration. "Remember me" persists
+(passwords are salted + PBKDF2-hashed). "Remember me" persists
 a session token via `QSettings` (`DeepVac`/`Insight`) so the app skips the
-login screen on the next launch; logging out clears it. "Profile" (from the
-account icon in the sidebar) lets the signed-in user change their name,
+login screen on the next launch; logging out clears it. "Profile" lets the signed-in user change their name,
 email, and password.
 
 ## Annotations & variable rules
@@ -90,7 +87,7 @@ email, and password.
 Chart annotations (drag-to-label a time range) and variable rules (min/max
 bands per channel), created from the Analysis tab, are persisted to
 `data\deepvac_annotations.sqlite3` — keyed by the run and the user who
-created them — instead of only living in memory. They survive closing the
+created them. They survive closing the
 tab, closing the app, and are visible to any user who opens that run, with
 the creator's name shown alongside each one.
 
@@ -110,10 +107,7 @@ current (possibly damaged) database first, so a bad restore can be undone.
 Live Monitoring connects to a real chamber over TCP (`app/services/tcp_client.py`,
 built on `QTcpSocket`). Wire protocol: newline-delimited JSON, one object per
 line, with the same keys as a `run_samples.csv` row (`temp`, `temp_ref`,
-`kp`, `ki`, `kd`, `temp_u`, `temp_u_p`, `temp_u_i`, `temp_u_d`). Once
-connected, the title bar's chamber-status pill and notification bell reflect
-it live, the Live Data table updates as samples arrive, and any defined
-alarms are evaluated against each sample.
+`kp`, `ki`, `kd`, `temp_u`, `temp_u_p`, `temp_u_i`, `temp_u_d`).
 
 The OPC Server page can only be started once that chamber connection is
 established — it re-broadcasts each incoming sample to any TCP client that
@@ -123,8 +117,8 @@ connects on the configured port (`app/services/opc_broadcast_server.py`).
 there if protocol compliance is required. Disconnecting the chamber
 connection automatically stops it.
 
-To test this without real hardware, run the gitignored dummy chamber server
-(`tcp/`, not part of the shipped app) and point Live Monitoring at it:
+To test this without real hardware, run the dummy chamber server
+(`tcp/`) and point Live Monitoring at it:
 
 ```powershell
 python tcp\dummy_chamber_server.py --port 5555

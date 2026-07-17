@@ -2,8 +2,7 @@
 
 ## Local setup
 
-Dependencies are declared in `pyproject.toml` (the single source of truth
--- there is no separate `requirements.txt`), managed with
+Dependencies are declared in `pyproject.toml`, managed with
 [uv](https://docs.astral.sh/uv/):
 
 ```powershell
@@ -30,7 +29,7 @@ uv run pytest
 `app/services/backup_service.py`, `app/common.py`) rather than the whole
 codebase -- see `[tool.mypy]` in `pyproject.toml`. That list only grows
 deliberately; adding a module to it means fixing whatever mypy finds
-there, not just flipping it on.
+there.
 
 ## Running specific test suites
 
@@ -42,8 +41,7 @@ uv run pytest -m "not integration" # skip the slower/checkpoint-loading tests
 ```
 
 See [docs/testing.md](docs/testing.md) for how test isolation actually
-works (no test may ever touch `%LOCALAPPDATA%\DeepVac\data` or the
-source-tree `data/` dir) and what the golden simulation fixture is for.
+works and what the golden simulation fixture is for.
 
 ## Coverage
 
