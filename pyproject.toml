@@ -15,6 +15,7 @@ dependencies = [
     "numpy==2.2.6",
     "openpyxl==3.1.5",
     "torch==2.12.1",
+    "asyncua==2.0.1",
 ]
 
 [project.optional-dependencies]

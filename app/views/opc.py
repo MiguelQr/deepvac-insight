@@ -1,9 +1,9 @@
-"""OpcMixin — builds the broadcast server setup page.
+"""OpcMixin — builds the OPC UA server setup page.
 
-NOTE: "OPC Server" here is a simplified TCP/JSON broadcast, not a
-spec-compliant OPC UA server — see app/services/opc_broadcast_server.py for
-why. It can only be started once the chamber connection (Live Monitoring)
-is established, since it broadcasts the samples that connection receives.
+Backed by a real asyncua OPC UA server (app/services/opc_broadcast_server.py)
+that any standard OPC UA client can browse and subscribe to. It can only be
+started once the chamber connection (Live Monitoring) is established, since
+it broadcasts the samples that connection receives.
 """
 
 from PySide6.QtCore import Qt
@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+_OPC_RATE_MS = {"100 ms": 100, "250 ms": 250, "500 ms": 500, "1 s": 1000}
+
 
 class OpcMixin:
     def _opc_view(self):
@@ -34,9 +36,9 @@ class OpcMixin:
         outer.addWidget(hdr)
         sub = QLabel(
             self.tr(
-                "Broadcast live chamber data to external TCP clients. Requires an "
-                "active chamber connection (Live Monitoring) — this is a simplified "
-                "JSON broadcast, not a spec-compliant OPC UA server."
+                "Broadcast live chamber data over a real OPC UA server. Requires an "
+                "active chamber connection (Live Monitoring); connect any OPC UA "
+                "client to browse and subscribe to the published variables."
             )
         )
         sub.setObjectName("sectionLabel")
@@ -71,8 +73,9 @@ class OpcMixin:
         self._opc_security.addItems(["None", "Basic128Rsa15", "Basic256Sha256"])
         self._opc_security.setToolTip(
             self.tr(
-                "Not enforced by the current simplified broadcast server; kept "
-                "here for a future real OPC UA implementation."
+                'Only "None" (anonymous, unencrypted) is currently enforced by '
+                "the server; the signed/encrypted policies need a certificate "
+                "this app doesn't provision yet."
             )
         )
 
@@ -81,8 +84,9 @@ class OpcMixin:
         self._opc_auth.addItem(self.tr("Username / Password"), "Username / Password")
         self._opc_auth.setToolTip(
             self.tr(
-                "Not enforced by the current simplified broadcast server; kept "
-                "here for a future real OPC UA implementation."
+                "Only anonymous access is currently enforced by the server; "
+                "username/password auth needs a credential store this app "
+                "doesn't have yet."
             )
         )
 
@@ -91,10 +95,10 @@ class OpcMixin:
         self._opc_update_rate.setCurrentIndex(2)
         self._opc_update_rate.setToolTip(
             self.tr(
-                "Broadcasts happen as samples arrive from the chamber connection; "
-                "this doesn't throttle them yet."
+                "Caps how often the latest chamber sample is pushed to the OPC UA variable nodes."
             )
         )
+        self._opc_update_rate.currentTextChanged.connect(self._on_opc_rate_changed)
 
         for row_idx, (cap, w) in enumerate(
             [
@@ -163,7 +167,13 @@ class OpcMixin:
         else:
             port = self._opc_port.value()
             namespace = self._opc_namespace.text().strip()
+            self.opc_server.set_update_rate(
+                _OPC_RATE_MS.get(self._opc_update_rate.currentText(), 500)
+            )
             self.opc_server.start(port, namespace=namespace)
+
+    def _on_opc_rate_changed(self, text):
+        self.opc_server.set_update_rate(_OPC_RATE_MS.get(text, 500))
 
     def _opc_set_tcp_connected(self, connected):
         if not connected and self.opc_server.is_running():
@@ -216,15 +226,13 @@ class OpcMixin:
         self._opc_info_lbl.setText(
             self.tr("Broadcasting")
             + "\n\n"
-            + self.tr("Host: {0} (or localhost)").format(host_ip)
-            + "\n"
-            + self.tr("Port: {0}").format(port)
+            + self.tr("Endpoint: opc.tcp://{0}:{1}/deepvac/insight/").format(host_ip, port)
             + "\n"
             + self.tr("Namespace: {0}").format(namespace)
             + "\n\n"
             + self.tr(
-                "Protocol: newline-delimited JSON. Connect any TCP client to\n"
-                "receive live chamber samples as they arrive."
+                "Connect any OPC UA client (e.g. UAExpert) to this endpoint\n"
+                "and browse to Objects → ChamberVariables for the live values."
             )
         )
 

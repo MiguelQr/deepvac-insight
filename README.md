@@ -21,7 +21,7 @@ insight/
 │   │   ├── annotations_service.py  # chart annotations + variable rules (sqlite), per run/user
 │   │   ├── backup_service.py       # automated sqlite backups + restore
 │   │   ├── tcp_client.py           # live chamber TCP connection (Live Monitoring)
-│   │   └── opc_broadcast_server.py # broadcasts chamber samples to TCP clients (OPC Server page)
+│   │   └── opc_broadcast_server.py # real OPC UA server publishing chamber samples (OPC Server page)
 │   ├── views/            # one module per page (dashboard, runs, reports, simulator, monitoring, opc)
 │   └── model/             # bundled GRU checkpoint + closed-loop simulator
 │       ├── model.pt
@@ -110,12 +110,18 @@ line, with the same keys as a `run_samples.csv` row (`temp`, `temp_ref`,
 `kp`, `ki`, `kd`, `temp_u`, `temp_u_p`, `temp_u_i`, `temp_u_d`).
 
 The OPC Server page can only be started once that chamber connection is
-established — it re-broadcasts each incoming sample to any TCP client that
-connects on the configured port (`app/services/opc_broadcast_server.py`).
-**This is a simplified JSON broadcast, not a spec-compliant OPC UA server**
-(no `asyncua`/`opcua` dependency is installed); swap in a real OPC UA server
-there if protocol compliance is required. Disconnecting the chamber
-connection automatically stops it.
+established — it runs a real, spec-compliant OPC UA server (built on
+`asyncua`, see `app/services/opc_broadcast_server.py`) that publishes each
+key of an incoming sample as a variable node under
+`Objects/ChamberVariables`, updating them in place as new samples arrive.
+Any standard OPC UA client (UAExpert, an `asyncua`/`python-opcua` client,
+etc.) can connect to `opc.tcp://<host>:<port>/deepvac/insight/`, browse to
+that node, and subscribe. The configured update rate caps how often the
+latest sample is pushed to the nodes. Only anonymous, unencrypted access
+is enforced today — the Security/Auth fields on the page are kept for a
+future implementation, since real certificate- or credential-backed access
+control isn't wired up yet. Disconnecting the chamber connection
+automatically stops the server.
 
 To test this without real hardware, run the dummy chamber server
 (`tcp/`) and point Live Monitoring at it:
