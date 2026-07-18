@@ -9,8 +9,9 @@ insight/
 ├── main.py              # entry point — run this
 ├── requirements.txt
 ├── app/                 # application package
-│   ├── app.py           # QApplication bootstrap, login flow, splash screen
+│   ├── app.py           # QApplication bootstrap, license gate, login flow, splash screen
 │   ├── main_window.py   # DeepVacDesktop main window
+│   ├── license_activation_window.py # cloud-license device-code activation screen
 │   ├── login_window.py  # sign in / create account screen
 │   ├── profile_dialog.py# change name, email, password
 │   ├── common.py        # shared constants, path config, icon helpers
@@ -18,6 +19,7 @@ insight/
 │   ├── services/
 │   │   ├── data_service.py         # run cache (sqlite), report generation
 │   │   ├── auth_service.py         # user accounts (sqlite), password hashing, sessions
+│   │   ├── licensing_client.py     # hub cloud-licensing client (device activation/renewal)
 │   │   ├── annotations_service.py  # chart annotations + variable rules (sqlite), per run/user
 │   │   ├── backup_service.py       # automated sqlite backups + restore
 │   │   ├── tcp_client.py           # live chamber TCP connection (Live Monitoring)
@@ -31,6 +33,7 @@ insight/
     ├── deepvac_runs.sqlite3
     ├── deepvac_users.sqlite3
     ├── deepvac_annotations.sqlite3
+    ├── license/             # device keypair + cached signed license certificate
     ├── backups/            # rotating daily backups of the databases above
     └── reports/
 ```
@@ -73,6 +76,39 @@ data\deepvac_runs.sqlite3
 ```
 
 Generated reports are written to `data\reports\`.
+
+## Cloud licensing (device activation)
+
+Before the sign-in screen, the app requires this installation to hold a
+valid signed license certificate from `hub` — the sibling repo implementing
+the vendor cloud licensing control plane (`../hub`). It never asks for a
+username/password itself for this: on first run (or whenever the cached
+license stops verifying) it shows an **Activate this installation** window
+with a short code, opens `hub`'s browser activation page, and polls until
+an organization admin approves the device there. See
+`app/services/licensing_client.py` and `app/license_activation_window.py`,
+and `../hub/docs/sequences.md` for the full protocol.
+
+To verify this locally against `hub`'s Docker Compose stack:
+
+```powershell
+cd ..\hub
+docker compose up -d
+docker compose run --rm tools alembic upgrade head
+docker compose run --rm tools python scripts/generate_signing_key.py --key-id dev-key-2026 --out-dir ./secrets
+docker compose run --rm tools python scripts/seed_development.py --key-id dev-key-2026 --public-key-file secrets/dev-key-2026.public.b64
+```
+
+That seeds a demo organization with an active `deepvac-insight` professional
+license (login `demo@example.com` / `DemoPass123!` at `http://localhost:8080/login`).
+Then just run `python main.py` here — it talks to `http://localhost:8080/api/v1`
+by default (`DEEPVAC_LICENSING_API_URL` to override). Approve the device
+using the demo login when the activation window opens its browser tab, and
+the app proceeds to the local sign-in screen once activation completes.
+The device keypair and cached license live under `data\license\`.
+
+Set `DEEPVAC_SKIP_LICENSE_CHECK=1` to bypass this gate entirely for
+unrelated dev work when no `hub` instance is running.
 
 ## Accounts
 

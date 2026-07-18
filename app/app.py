@@ -1,5 +1,6 @@
 """Entry point — login flow, splash screen, and main() only."""
 
+import os
 import sys
 
 from PySide6.QtCore import QCoreApplication, QRectF, QSettings, Qt, QTimer
@@ -7,9 +8,17 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QSplashScreen
 
 from app.common import ICON_PATH, LOGO_PATH
+from app.license_activation_window import LicenseActivationWindow
 from app.login_window import LoginWindow
 from app.main_window import DeepVacDesktop
-from app.services import auth_service, backup_service, i18n_service, log_service, settings_service
+from app.services import (
+    auth_service,
+    backup_service,
+    i18n_service,
+    licensing_client,
+    log_service,
+    settings_service,
+)
 
 
 class LoadingSplash(QSplashScreen):
@@ -50,6 +59,30 @@ def make_splash():
 def _remembered_user():
     token = QSettings("DeepVac", "Insight").value("auth/remember_token", "")
     return auth_service.get_user_by_token(token) if token else None
+
+
+def _ensure_license_activated(app):
+    """Cloud-licensing gate: this installation must hold a valid signed
+    license certificate before normal use, obtained via the hub's
+    browser-based device-code activation flow (see
+    app/services/licensing_client.py and the sibling `hub` repo's
+    docs/sequences.md) -- never a username/password prompt in-app.
+
+    Returns True if licensed (already cached and still valid, or freshly
+    activated in this run), False if the user quit or activation failed.
+
+    DEEPVAC_SKIP_LICENSE_CHECK=1 bypasses this entirely, for development
+    work that has nothing to do with licensing and no hub instance running.
+    """
+    if os.environ.get("DEEPVAC_SKIP_LICENSE_CHECK"):
+        return True
+    if licensing_client.has_valid_local_license():
+        return True
+
+    activation = LicenseActivationWindow()
+    activation.show()
+    app.exec()
+    return activation.activated_license is not None
 
 
 def _show_splash(app, window_receiver_attr_name=None):
@@ -140,6 +173,9 @@ def main():
         backup_service.backup_all()
     except Exception as exc:
         print(f"[backup] startup backup skipped: {exc}")
+
+    if not _ensure_license_activated(app):
+        sys.exit(0)
 
     user = _remembered_user()
 
