@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 import app.services.alarms_service as alarms_service
 from app.common import REPORTS_DIR, _svg_icon, fmt
+from app.services.chamber_session import MAX_CONNECTED_CHAMBERS
 
 _DASH_PAGE_SIZE = 5
 _DASH_RANGES = [
@@ -623,23 +624,19 @@ class DashboardMixin:
             )
         )
 
-        online = getattr(self, "_chamber_connected", False)
-        active_chamber = getattr(self, "_active_chamber", None)
-        chamber_name = active_chamber["name"] if active_chamber else None
-        if online:
-            chamber_val = chamber_name or self.tr("Online")
-            chamber_sub, chamber_color = self.tr("Live"), "#22c55e"
+        sessions = list(getattr(self, "_chamber_sessions", {}).values())
+        connected = [s for s in sessions if s.is_connected()]
+        if connected:
+            chamber_val = f"{len(connected)}/{MAX_CONNECTED_CHAMBERS}"
+            names = ", ".join(s.chamber["name"] for s in connected)
+            chamber_sub, chamber_color = names, "#22c55e"
         else:
-            seen = _time_ago(getattr(self, "_chamber_last_seen", None))
-            chamber_val = self.tr("Offline")
-            if seen:
-                chamber_sub = (
-                    self.tr("{0} — last seen: {1}").format(chamber_name, seen)
-                    if chamber_name
-                    else self.tr("Last seen: {0}").format(seen)
-                )
-            else:
-                chamber_sub = self.tr("Never connected")
+            last_seens = [s.last_seen for s in sessions if s.last_seen is not None]
+            seen = _time_ago(max(last_seens)) if last_seens else None
+            chamber_val = f"0/{MAX_CONNECTED_CHAMBERS}"
+            chamber_sub = (
+                self.tr("Last seen: {0}").format(seen) if seen else self.tr("Never connected")
+            )
             chamber_color = "#ef4444"
         self._dash_stats_row.addWidget(
             self._dash_stat_tile(
