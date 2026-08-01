@@ -208,21 +208,21 @@ class DashboardMixin:
         range_row_widget = QWidget()
         range_row_widget.setLayout(range_row)
         trend_card, trend_lay = self._dash_card(
-            self.tr("PERFORMANCE TREND — COST OVER RUNS"), header_extra=range_row_widget
+            self.tr("PERFORMANCE TREND — TAIL MAE OVER RUNS"), header_extra=range_row_widget
         )
-        self._dash_cost_plot = pg.PlotWidget()
-        self._dash_cost_plot.setBackground("#111827" if self.dark else "#f8fafc")
-        self._dash_cost_plot.showGrid(x=True, y=True, alpha=0.22)
-        self._dash_cost_plot.setMinimumHeight(190)
-        self._dash_cost_plot.setMaximumHeight(260)
-        self._dash_cost_plot.setMenuEnabled(False)
-        trend_lay.addWidget(self._dash_cost_plot, 1)
+        self._dash_mae_plot = pg.PlotWidget()
+        self._dash_mae_plot.setBackground("#111827" if self.dark else "#f8fafc")
+        self._dash_mae_plot.showGrid(x=True, y=True, alpha=0.22)
+        self._dash_mae_plot.setMinimumHeight(190)
+        self._dash_mae_plot.setMaximumHeight(260)
+        self._dash_mae_plot.setMenuEnabled(False)
+        trend_lay.addWidget(self._dash_mae_plot, 1)
         left_col.addWidget(trend_card)
 
         lower_row = QHBoxLayout()
         lower_row.setSpacing(12)
 
-        ovr_card, ovr_lay = self._dash_card(self.tr("OVERSHOOT vs COST"))
+        ovr_card, ovr_lay = self._dash_card(self.tr("OVERSHOOT vs TAIL MAE"))
         self._dash_ovr_plot = pg.PlotWidget()
         self._dash_ovr_plot.setBackground("#111827" if self.dark else "#f8fafc")
         self._dash_ovr_plot.showGrid(x=True, y=True, alpha=0.22)
@@ -285,7 +285,7 @@ class DashboardMixin:
         best_view_all.setFlat(True)
         best_view_all.clicked.connect(lambda: self._nav_to(1))
         best_card, best_lay = self._dash_card(
-            self.tr("Best Runs (By Cost)"), header_extra=best_view_all
+            self.tr("Best Runs (By Tail MAE)"), header_extra=best_view_all
         )
         self._dash_best_list = QListWidget()
         self._dash_best_list.setMaximumHeight(160)
@@ -457,7 +457,7 @@ class DashboardMixin:
         )
         if not path:
             return
-        fields = ["id", "group", "status", "cost", "tail_mae", "overshoot", "start_time"]
+        fields = ["id", "group", "status", "tail_mae", "overshoot", "start_time"]
         try:
             with open(path, "w", newline="", encoding="utf-8") as fh:
                 writer = csv.writer(fh)
@@ -468,7 +468,6 @@ class DashboardMixin:
                             r.get("id"),
                             r.get("group"),
                             _run_status(r),
-                            r.get("cost"),
                             r.get("tail_mae"),
                             r.get("overshoot"),
                             r.get("start_time"),
@@ -696,7 +695,7 @@ class DashboardMixin:
         return box
 
     def _draw_dashboard_charts(self):
-        self._dash_cost_plot.clear()
+        self._dash_mae_plot.clear()
         self._dash_ovr_plot.clear()
         rows = self._dash_range_filtered()
         if not rows:
@@ -709,12 +708,14 @@ class DashboardMixin:
             ),
         )
         xs = list(range(len(ordered)))
-        costs = [
-            (x, r["cost"]) for x, r in zip(xs, ordered, strict=False) if r.get("cost") is not None
+        maes = [
+            (x, r["tail_mae"])
+            for x, r in zip(xs, ordered, strict=False)
+            if r.get("tail_mae") is not None
         ]
-        if costs:
-            vx, vy = zip(*costs, strict=False)
-            self._dash_cost_plot.plot(
+        if maes:
+            vx, vy = zip(*maes, strict=False)
+            self._dash_mae_plot.plot(
                 list(vx),
                 list(vy),
                 pen=pg.mkPen("#60a5fa", width=1.8),
@@ -723,13 +724,13 @@ class DashboardMixin:
                 symbolBrush="#60a5fa",
                 symbolPen=None,
             )
-        self._dash_cost_plot.setLabel("bottom", self.tr("Run (oldest → newest)"))
-        self._dash_cost_plot.setLabel("left", self.tr("Cost"))
+        self._dash_mae_plot.setLabel("bottom", self.tr("Run (oldest → newest)"))
+        self._dash_mae_plot.setLabel("left", self.tr("Tail MAE"))
 
         pairs = [
-            (r["cost"], r["overshoot"])
+            (r["tail_mae"], r["overshoot"])
             for r in rows
-            if r.get("cost") is not None and r.get("overshoot") is not None
+            if r.get("tail_mae") is not None and r.get("overshoot") is not None
         ]
         if pairs:
             cx, cy = zip(*pairs, strict=False)
@@ -741,7 +742,7 @@ class DashboardMixin:
                 pen=pg.mkPen("#111827", width=0.5),
             )
             self._dash_ovr_plot.addItem(scatter)
-        self._dash_ovr_plot.setLabel("bottom", self.tr("Cost"))
+        self._dash_ovr_plot.setLabel("bottom", self.tr("Tail MAE"))
         self._dash_ovr_plot.setLabel("left", self.tr("Overshoot"))
 
     def _dash_refresh_table(self):
@@ -758,7 +759,6 @@ class DashboardMixin:
             self.tr("Run ID"),
             self.tr("Group"),
             self.tr("Status"),
-            self.tr("Cost"),
             self.tr("Tail MAE"),
             self.tr("Overshoot"),
             self.tr("Date"),
@@ -791,7 +791,6 @@ class DashboardMixin:
                 r.get("id", ""),
                 r.get("group", "-"),
                 None,
-                fmt(r.get("cost")),
                 fmt(r.get("tail_mae")),
                 fmt(r.get("overshoot")),
                 date_str,
@@ -833,10 +832,10 @@ class DashboardMixin:
 
     def _dash_refresh_best_runs(self):
         self._dash_best_list.clear()
-        rows = [r for r in self._dash_range_filtered() if r.get("cost") is not None]
-        best = sorted(rows, key=lambda r: r["cost"])[:3]
+        rows = [r for r in self._dash_range_filtered() if r.get("tail_mae") is not None]
+        best = sorted(rows, key=lambda r: r["tail_mae"])[:3]
         for i, r in enumerate(best, start=1):
-            item = QListWidgetItem(f"{i}.  {r['id']}   —   cost {fmt(r['cost'])}")
+            item = QListWidgetItem(f"{i}.  {r['id']}   —   MAE {fmt(r['tail_mae'])}")
             item.setData(Qt.UserRole, r["key"])
             self._dash_best_list.addItem(item)
         if not best:

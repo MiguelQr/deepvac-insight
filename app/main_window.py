@@ -824,7 +824,7 @@ class DeepVacDesktop(
         self.editor_area.update_theme(self.dark)
         self.monitor_editor_area.update_theme(self.dark)
         dash_bg = "#111827" if self.dark else "#f8fafc"
-        for p in [self._dash_cost_plot, self._dash_ovr_plot]:
+        for p in [self._dash_mae_plot, self._dash_ovr_plot]:
             p.setBackground(dash_bg)
         self._rebuild_nav_icons(c)
         # _rebuild_nav_icons resets the bell to its neutral color; re-apply the
